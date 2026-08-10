@@ -349,7 +349,155 @@ def lire_journal(chemin_journal):
 
 
 # =============================================================================
-# Cœur du programme : traiter le dossier _a_trier
+# Cœur réutilisable : analyser puis appliquer (utilisé par la ligne de
+# commande ET par l'interface graphique trier_documents_gui.py)
+# =============================================================================
+#
+# On sépare volontairement deux étapes :
+#   1) ANALYSER : on regarde chaque PDF et on décide ce qu'il FAUDRAIT faire,
+#      SANS toucher au disque. Chaque décision est un petit dictionnaire
+#      « opération » (voir analyser_fichier).
+#   2) APPLIQUER : on exécute réellement une opération (déplacement + journal).
+#
+# Cette séparation permet d'afficher un aperçu (simulation) avant d'agir,
+# aussi bien dans le terminal que dans la fenêtre du logiciel.
+
+
+def lister_pdf(base):
+    """Retourne la liste triée des PDF présents dans _a_trier.
+
+    Retourne None si le dossier _a_trier n'existe pas (cas à signaler à
+    l'utilisateur), ou une liste (éventuellement vide) sinon.
+    """
+    dossier_a_trier = Path(base) / DOSSIER_A_TRIER
+    if not dossier_a_trier.exists():
+        return None
+    return sorted(
+        p for p in dossier_a_trier.iterdir()
+        if p.is_file() and p.suffix.lower() == ".pdf"
+    )
+
+
+def analyser_fichier(chemin_pdf, regles, base):
+    """Analyse UN PDF et retourne l'opération prévue (sans rien déplacer).
+
+    Le dictionnaire retourné contient tout ce qu'il faut pour :
+      - afficher un aperçu à l'utilisateur,
+      - puis exécuter le déplacement plus tard (via appliquer_operation).
+
+    Clés du dictionnaire :
+      source_path   : chemin actuel du fichier (Path)
+      source_name   : nom actuel du fichier (str)
+      classe        : True si reconnu avec assez de confiance, False sinon
+      emetteur      : nom de l'émetteur reconnu (str) ou None
+      categorie     : "Prive/Energie-Telecom" ... ou "_non_classe"
+      confiance     : score (nombre de mots-clés trouvés)
+      date          : date retenue "AAAA-MM-JJ" (None si non classé)
+      date_source   : "document", "modification" ou None
+      dossier_cible : dossier de destination (Path)
+      nouveau_nom   : nom de fichier prévu (str ; inchangé si non classé)
+    """
+    base = Path(base)
+    seuil = regles.get("reglages", {}).get("seuil_confiance_min", 2)
+
+    # 1) Lire le texte du PDF, puis identifier l'émetteur.
+    texte = lire_texte_pdf(chemin_pdf)
+    emetteur, score = identifier_emetteur(texte, regles)
+
+    # 2) Confiance trop faible -> _non_classe, sans renommer.
+    if emetteur is None or score < seuil:
+        return {
+            "source_path": chemin_pdf,
+            "source_name": chemin_pdf.name,
+            "classe": False,
+            "emetteur": None,
+            "categorie": DOSSIER_NON_CLASSE,
+            "confiance": score,
+            "date": None,
+            "date_source": None,
+            "dossier_cible": base / DOSSIER_NON_CLASSE,
+            "nouveau_nom": chemin_pdf.name,   # on garde le nom d'origine
+        }
+
+    # 3) Confiance suffisante : on trouve la date (ou repli sur date de modif).
+    date = extraire_date(texte)
+    date_source = "document"
+    if date is None:
+        date = date_de_modification(chemin_pdf)
+        date_source = "modification"
+
+    annee = date[:4]
+
+    # 4) Construire le nouveau nom : AAAA-MM-JJ_Emetteur_type.pdf
+    nom_emetteur = nettoyer_pour_nom_fichier(emetteur["emetteur"])
+    type_doc = nettoyer_pour_nom_fichier(emetteur.get("type", "document"))
+    nouveau_nom = f"{date}_{nom_emetteur}_{type_doc}.pdf"
+
+    # 5) Construire le dossier de destination : Domaine/annee/Destination
+    domaine = emetteur["domaine"]           # "Prive" ou "Pro"
+    sous_dossier = emetteur["destination"]  # ex : Energie-Telecom
+    categorie = f"{domaine}/{sous_dossier}"
+    dossier_cible = base / domaine / annee / sous_dossier
+
+    return {
+        "source_path": chemin_pdf,
+        "source_name": chemin_pdf.name,
+        "classe": True,
+        "emetteur": emetteur["emetteur"],
+        "categorie": categorie,
+        "confiance": score,
+        "date": date,
+        "date_source": date_source,
+        "dossier_cible": dossier_cible,
+        "nouveau_nom": nouveau_nom,
+    }
+
+
+def analyser_dossier(base, regles):
+    """Analyse tous les PDF de _a_trier et retourne la liste des opérations.
+
+    Ne touche à aucun fichier (simulation). Lève FileNotFoundError si le
+    dossier _a_trier n'existe pas, pour que l'appelant affiche un message.
+    """
+    fichiers_pdf = lister_pdf(base)
+    if fichiers_pdf is None:
+        raise FileNotFoundError(Path(base) / DOSSIER_A_TRIER)
+    return [analyser_fichier(p, regles, base) for p in fichiers_pdf]
+
+
+def appliquer_operation(operation, chemin_journal):
+    """Exécute réellement UNE opération : déplace le fichier et journalise.
+
+    - Crée le dossier de destination si besoin.
+    - Évite toute collision de nom (suffixe _2, _3, ...) : on ne supprime
+      et on n'écrase jamais rien.
+    - Ajoute une ligne au journal.csv.
+
+    Retourne le chemin final (Path) où le fichier a été déplacé.
+    """
+    dossier_cible = operation["dossier_cible"]
+
+    # On calcule le chemin final au dernier moment, pour tenir compte des
+    # fichiers éventuellement créés par les opérations précédentes du lot.
+    destination = chemin_sans_collision(dossier_cible / operation["nouveau_nom"])
+
+    dossier_cible.mkdir(parents=True, exist_ok=True)
+    shutil.move(str(operation["source_path"]), str(destination))
+
+    ajouter_au_journal(chemin_journal, {
+        "date_operation": datetime.datetime.now().isoformat(timespec="seconds"),
+        "nom_original": operation["source_name"],
+        "chemin_original": str(operation["source_path"]),
+        "nouveau_nom": destination.name,
+        "nouveau_chemin": str(destination),
+        "categorie": operation["categorie"],
+        "confiance": operation["confiance"],
+    })
+    return destination
+
+
+# =============================================================================
+# Version « ligne de commande » : afficher l'aperçu et (option) appliquer
 # =============================================================================
 
 def traiter_dossier(base, regles, mode_execute):
@@ -359,124 +507,63 @@ def traiter_dossier(base, regles, mode_execute):
       - base         : chemin du dossier Administration
       - regles       : les règles chargées depuis regles.yaml
       - mode_execute : True = on déplace vraiment ; False = simulation
+
+    Cette fonction s'appuie entièrement sur le cœur réutilisable ci-dessus :
+    elle se contente d'afficher les résultats dans le terminal.
     """
-    dossier_a_trier = base / DOSSIER_A_TRIER
-    dossier_non_classe = base / DOSSIER_NON_CLASSE
+    base = Path(base)
     chemin_journal = base / FICHIER_JOURNAL
 
-    # Seuil minimum de confiance, lu depuis les règles (2 par défaut).
-    seuil = regles.get("reglages", {}).get("seuil_confiance_min", 2)
-
-    if not dossier_a_trier.exists():
-        print(f"Erreur : le dossier '{dossier_a_trier}' n'existe pas.")
+    # Étape 1 : analyser (aucun fichier n'est touché ici).
+    try:
+        operations = analyser_dossier(base, regles)
+    except FileNotFoundError as chemin_manquant:
+        print(f"Erreur : le dossier '{chemin_manquant}' n'existe pas.")
         print("Crée-le et déposes-y tes PDF, puis relance le script.")
         sys.exit(1)
 
-    # On récupère uniquement les fichiers .pdf (peu importe la casse), triés.
-    fichiers_pdf = sorted(
-        p for p in dossier_a_trier.iterdir()
-        if p.is_file() and p.suffix.lower() == ".pdf"
-    )
-
-    if not fichiers_pdf:
-        print(f"Aucun PDF à traiter dans '{dossier_a_trier}'.")
+    if not operations:
+        print(f"Aucun PDF à traiter dans '{base / DOSSIER_A_TRIER}'.")
         return
 
-    # Petit rappel visible du mode en cours.
+    # Rappel visible du mode en cours.
     if mode_execute:
         print(">>> MODE EXECUTION : les fichiers vont être RÉELLEMENT déplacés.\n")
     else:
         print(">>> MODE SIMULATION : rien ne sera modifié (ajoute --execute pour agir).\n")
 
-    # Compteurs pour le résumé final.
     nb_classes = 0
     nb_non_classes = 0
 
-    for chemin_pdf in fichiers_pdf:
-        print(f"Fichier : {chemin_pdf.name}")
+    for operation in operations:
+        print(f"Fichier : {operation['source_name']}")
 
-        # 1) Lire le texte du PDF.
-        texte = lire_texte_pdf(chemin_pdf)
-
-        # 2) Identifier l'émetteur / la catégorie.
-        emetteur, score = identifier_emetteur(texte, regles)
-
-        # 3) Décider : confiance suffisante ou non ?
-        if emetteur is None or score < seuil:
-            # --- Confiance trop faible : direction _non_classe ---
+        if not operation["classe"]:
+            # --- Confiance trop faible ---
             nb_non_classes += 1
-            categorie = "_non_classe"
-            print(f"  -> Confiance faible (score {score} < seuil {seuil}).")
+            print(f"  -> Confiance faible (score {operation['confiance']}). "
+                  f"Direction {DOSSIER_NON_CLASSE}.")
+        else:
+            # --- Reconnu ---
+            nb_classes += 1
+            if operation["date_source"] == "modification":
+                print(f"  ! Aucune date trouvée dans le texte : utilisation de "
+                      f"la date de modification du fichier ({operation['date']}).")
+            print(f"  -> Émetteur : {operation['emetteur']} "
+                  f"(catégorie {operation['categorie']}, "
+                  f"confiance {operation['confiance']})")
 
-            # On ne renomme PAS : on garde le nom d'origine.
-            destination = chemin_sans_collision(dossier_non_classe / chemin_pdf.name)
-
-            if mode_execute:
-                dossier_non_classe.mkdir(parents=True, exist_ok=True)
-                shutil.move(str(chemin_pdf), str(destination))
-                ajouter_au_journal(chemin_journal, {
-                    "date_operation": datetime.datetime.now().isoformat(timespec="seconds"),
-                    "nom_original": chemin_pdf.name,
-                    "chemin_original": str(chemin_pdf),
-                    "nouveau_nom": destination.name,
-                    "nouveau_chemin": str(destination),
-                    "categorie": categorie,
-                    "confiance": score,
-                })
-                print(f"  -> Déplacé vers : {destination}")
-            else:
-                print(f"  -> SERAIT déplacé vers : {destination}")
-            print()
-            continue
-
-        # --- Confiance suffisante : on classe pour de bon ---
-        nb_classes += 1
-
-        # 4) Trouver la date du document (ou repli sur la date de modif).
-        date = extraire_date(texte)
-        if date is None:
-            date = date_de_modification(chemin_pdf)
-            print(f"  ! Aucune date trouvée dans le texte : "
-                  f"utilisation de la date de modification du fichier ({date}).")
-
-        # L'année sert à créer le sous-dossier <annee>.
-        annee = date[:4]
-
-        # 5) Construire le nouveau nom : AAAA-MM-JJ_Emetteur_type.pdf
-        nom_emetteur = nettoyer_pour_nom_fichier(emetteur["emetteur"])
-        type_doc = nettoyer_pour_nom_fichier(emetteur.get("type", "document"))
-        nouveau_nom = f"{date}_{nom_emetteur}_{type_doc}.pdf"
-
-        # 6) Construire le dossier de destination : Domaine/annee/Destination
-        domaine = emetteur["domaine"]           # "Prive" ou "Pro"
-        sous_dossier = emetteur["destination"]  # ex : Energie-Telecom
-        categorie = f"{domaine}/{sous_dossier}"
-        dossier_cible = base / domaine / annee / sous_dossier
-
-        # On évite d'écraser un fichier existant (suffixe _2, _3, ...).
-        destination = chemin_sans_collision(dossier_cible / nouveau_nom)
-
-        print(f"  -> Émetteur : {emetteur['emetteur']} "
-              f"(catégorie {categorie}, confiance {score})")
+        # Aperçu de la destination (nom sans le suffixe anti-collision).
+        apercu = operation["dossier_cible"] / operation["nouveau_nom"]
 
         if mode_execute:
-            dossier_cible.mkdir(parents=True, exist_ok=True)
-            shutil.move(str(chemin_pdf), str(destination))
-            ajouter_au_journal(chemin_journal, {
-                "date_operation": datetime.datetime.now().isoformat(timespec="seconds"),
-                "nom_original": chemin_pdf.name,
-                "chemin_original": str(chemin_pdf),
-                "nouveau_nom": destination.name,
-                "nouveau_chemin": str(destination),
-                "categorie": categorie,
-                "confiance": score,
-            })
+            destination = appliquer_operation(operation, chemin_journal)
             print(f"  -> Déplacé vers : {destination}")
         else:
-            print(f"  -> SERAIT renommé/déplacé vers : {destination}")
+            print(f"  -> SERAIT déplacé vers : {apercu}")
         print()
 
-    # Résumé final, toujours utile pour se rassurer.
+    # Résumé final.
     print("----- Résumé -----")
     print(f"  Classés        : {nb_classes}")
     print(f"  Non classés    : {nb_non_classes}")

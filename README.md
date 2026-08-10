@@ -4,9 +4,17 @@ Petit outil en Python qui range automatiquement tes PDF administratifs.
 Tu déposes tes documents en vrac dans un dossier, le script les **identifie**,
 les **renomme** et les **classe** dans une arborescence Privé / Pro.
 
-> **Sécurité d'abord :** par défaut le script est en **mode simulation**.
-> Il affiche ce qu'il *ferait* mais ne touche à **aucun** fichier tant que tu
-> n'ajoutes pas `--execute`. Il ne supprime et n'écrase jamais rien.
+> **Sécurité d'abord :** rien n'est jamais modifié sans que tu voies d'abord
+> un **aperçu**, et le logiciel ne supprime ni n'écrase jamais aucun fichier.
+
+Il y a **deux façons** de s'en servir, au choix :
+
+- 🪟 **Le logiciel (fenêtre)** — le plus simple : des boutons, un tableau,
+  aucune commande à taper. → voir la section 2.
+- ⌨️ **La ligne de commande** — pour les habitués du terminal ou les
+  traitements automatisés. → voir la section 3.
+
+Les deux utilisent exactement le même moteur de classement.
 
 ---
 
@@ -18,9 +26,42 @@ Il te faut Python 3 (≥ 3.8). Installe ensuite les dépendances :
 pip install -r requirements.txt
 ```
 
-## 2. Préparer les dossiers
+> Sous **Windows** et **macOS**, l'installateur officiel de python.org inclut
+> déjà tout ce qu'il faut pour la fenêtre (tkinter) — rien de plus à installer.
+> Sous **Linux**, si la fenêtre ne s'ouvre pas, installe le paquet
+> `python3-tk` (ex. `sudo apt install python3-tk`).
 
-Crée le dossier où tu déposeras tes PDF, puis mets-y tes documents :
+## 2. Le logiciel (fenêtre) — le plus simple
+
+### Lancer
+
+- **Windows** : double-clique sur **`Lancer_le_logiciel.bat`**.
+  (ou, dans un terminal : `python trier_documents_gui.py`)
+- **macOS / Linux** : `python3 trier_documents_gui.py`
+
+### Utiliser, en 3 boutons
+
+1. **« 1. Analyser (aperçu) »** — le logiciel lit les PDF de `_a_trier` et
+   affiche dans un tableau ce qu'il compte faire (émetteur, dossier de
+   rangement, date, nouveau nom). **Rien n'est déplacé** à cette étape.
+   Les documents non reconnus apparaissent surlignés (ils iront dans
+   `_non_classe`, sans être renommés).
+2. **« 2. Classer les fichiers ▶ »** — après une confirmation, il déplace et
+   renomme réellement les fichiers, et note tout dans le journal.
+3. **« ↩ Annuler le dernier classement »** — remet chaque fichier du dernier
+   classement à son emplacement et son nom d'origine.
+
+Le bouton **« Changer… »** permet de choisir un autre dossier de travail, et
+**« Ouvrir le dossier »** l'ouvre dans l'explorateur de fichiers.
+
+Voici à quoi ressemble la fenêtre après un clic sur « Analyser » :
+
+> *(capture d'écran : le tableau liste chaque PDF avec l'émetteur détecté,
+> le dossier de rangement, la date et le nouveau nom.)*
+
+## 3. La ligne de commande (variante terminal)
+
+D'abord, crée le dossier où tu déposeras tes PDF, puis mets-y tes documents :
 
 ```bash
 mkdir -p Administration/_a_trier
@@ -29,8 +70,6 @@ mkdir -p Administration/_a_trier
 
 Le reste de l'arborescence (`Prive/`, `Pro/`, `_non_classe/`) est créé
 automatiquement au fur et à mesure.
-
-## 3. Utilisation
 
 ### a) Simulation (recommandé pour commencer — rien n'est modifié)
 
@@ -119,13 +158,15 @@ python3 trier_documents.py --annuler
 
 ## 8. Contenu du projet
 
-| Fichier                | Rôle                                             |
-|------------------------|--------------------------------------------------|
-| `trier_documents.py`   | le script principal                              |
-| `regles.yaml`          | les règles de classement (éditable)              |
-| `generer_pdf_test.py`  | génère 3 PDF de test                             |
-| `requirements.txt`     | les dépendances Python                           |
-| `README.md`            | ce fichier                                       |
+| Fichier                    | Rôle                                             |
+|----------------------------|--------------------------------------------------|
+| `trier_documents_gui.py`   | **le logiciel (fenêtre)** — à lancer pour l'interface |
+| `Lancer_le_logiciel.bat`   | raccourci Windows : double-clic pour ouvrir la fenêtre |
+| `trier_documents.py`       | le moteur de tri + la version ligne de commande  |
+| `regles.yaml`              | les règles de classement (éditable)              |
+| `generer_pdf_test.py`      | génère 3 PDF de test                             |
+| `requirements.txt`         | les dépendances Python                           |
+| `README.md`                | ce fichier                                       |
 
 ---
 
