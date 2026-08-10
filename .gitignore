@@ -1,0 +1,10 @@
+# Dossier de travail créé par le script (documents personnels, PDF triés).
+# On ne veut PAS envoyer ses documents administratifs sur GitHub.
+Administration/
+
+# Journal d'opérations (peut contenir des noms de fichiers personnels).
+journal.csv
+
+# Fichiers Python temporaires
+__pycache__/
+*.pyc

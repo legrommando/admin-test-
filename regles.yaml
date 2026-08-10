@@ -1,0 +1,233 @@
+# =============================================================================
+# regles.yaml — Règles de classement des documents administratifs
+# =============================================================================
+#
+# Ce fichier est lu par le script trier_documents.py.
+# Tu peux le modifier librement, SANS toucher au code Python.
+#
+# Comment ça marche ?
+#   - Le script lit le texte de chaque PDF.
+#   - Il compare ce texte à la liste des émetteurs ci-dessous.
+#   - Pour chaque émetteur, il cherche les "mots_cles".
+#     Plus il en trouve, plus la "confiance" est grande.
+#   - L'émetteur qui obtient le meilleur score gagne : le document
+#     est rangé dans sa "destination" et renommé avec son "type".
+#
+# Chaque émetteur possède :
+#   - mots_cles   : liste de mots/expressions à chercher dans le texte.
+#                   (la casse et les accents n'ont pas d'importance)
+#   - domaine     : "Prive" ou "Pro" (le grand dossier de rangement)
+#   - destination : le sous-dossier de rangement (ex : Energie-Telecom)
+#   - emetteur    : nom court utilisé dans le nom de fichier (ex : EDF)
+#   - type        : type de document utilisé dans le nom de fichier
+#                   (ex : facture, releve, avis-impot...)
+#
+# Nom de fichier final produit : AAAA-MM-JJ_Emetteur_type-de-document.pdf
+#
+# ---------------------------------------------------------------------------
+# Réglages généraux
+# ---------------------------------------------------------------------------
+reglages:
+  # Nombre minimum de mots-clés à trouver pour accepter un classement.
+  # En dessous, le document part dans _non_classe (sans être renommé).
+  seuil_confiance_min: 2
+
+  # Sous-dossiers créés dans Prive/<annee>/ (juste pour info / création).
+  dossiers_prive:
+    - Logement
+    - Energie-Telecom
+    - Banque-Assurance
+    - Sante
+    - Impots
+    - Vehicule
+    - Divers
+
+  # Sous-dossiers créés dans Pro/<annee>/.
+  dossiers_pro:
+    - Factures-Clients
+    - Achats-Fournisseurs
+    - Banque
+    - Social-URSSAF
+    - Impots-TVA
+    - Divers
+
+# ---------------------------------------------------------------------------
+# Liste des émetteurs connus
+# ---------------------------------------------------------------------------
+# Astuce : pour ajouter un nouvel émetteur, copie un bloc existant et
+# adapte-le. L'ordre n'a pas d'importance : c'est le score qui décide.
+emetteurs:
+
+  # ---------- Énergie ----------
+  - emetteur: EDF
+    domaine: Prive
+    destination: Energie-Telecom
+    type: facture-electricite
+    mots_cles:
+      - EDF
+      - Electricite de France
+      - facture d'electricite
+      - reference client
+
+  - emetteur: Engie
+    domaine: Prive
+    destination: Energie-Telecom
+    type: facture-gaz
+    mots_cles:
+      - Engie
+      - GDF
+      - gaz naturel
+      - facture de gaz
+
+  - emetteur: TotalEnergies
+    domaine: Prive
+    destination: Energie-Telecom
+    type: facture-energie
+    mots_cles:
+      - TotalEnergies
+      - Total Energies
+      - electricite et gaz
+
+  # ---------- Télécom / Internet ----------
+  - emetteur: Orange
+    domaine: Prive
+    destination: Energie-Telecom
+    type: facture-telecom
+    mots_cles:
+      - Orange
+      - facture Orange
+      - mobile et internet
+
+  - emetteur: SFR
+    domaine: Prive
+    destination: Energie-Telecom
+    type: facture-telecom
+    mots_cles:
+      - SFR
+      - Societe Francaise du Radiotelephone
+      - facture SFR
+
+  - emetteur: Free
+    domaine: Prive
+    destination: Energie-Telecom
+    type: facture-telecom
+    mots_cles:
+      - Free
+      - Freebox
+      - Free Mobile
+
+  # ---------- Banque / Assurance ----------
+  - emetteur: MAIF
+    domaine: Prive
+    destination: Banque-Assurance
+    type: assurance
+    mots_cles:
+      - MAIF
+      - assurance
+      - numero de societaire
+      - cotisation
+
+  - emetteur: AXA
+    domaine: Prive
+    destination: Banque-Assurance
+    type: assurance
+    mots_cles:
+      - AXA
+      - contrat d'assurance
+      - echeance de cotisation
+
+  - emetteur: CreditAgricole
+    domaine: Prive
+    destination: Banque-Assurance
+    type: releve-compte
+    mots_cles:
+      - Credit Agricole
+      - releve de compte
+      - RIB
+      - IBAN
+
+  - emetteur: BNPParibas
+    domaine: Prive
+    destination: Banque-Assurance
+    type: releve-compte
+    mots_cles:
+      - BNP Paribas
+      - releve de compte
+      - solde precedent
+
+  # ---------- Santé ----------
+  - emetteur: CPAM
+    domaine: Prive
+    destination: Sante
+    type: releve-remboursement
+    mots_cles:
+      - CPAM
+      - Assurance Maladie
+      - Ameli
+      - releve de remboursements
+      - decompte
+
+  - emetteur: Mutuelle
+    domaine: Prive
+    destination: Sante
+    type: releve-mutuelle
+    mots_cles:
+      - mutuelle
+      - complementaire sante
+      - remboursement complementaire
+
+  # ---------- Impôts (privé) ----------
+  - emetteur: DGFiP
+    domaine: Prive
+    destination: Impots
+    type: avis-impot
+    mots_cles:
+      - DGFiP
+      - Direction generale des Finances publiques
+      - avis d'impot
+      - impot sur le revenu
+      - taxe fonciere
+      - taxe d'habitation
+
+  # ---------- Véhicule ----------
+  - emetteur: ANTS
+    domaine: Prive
+    destination: Vehicule
+    type: carte-grise
+    mots_cles:
+      - certificat d'immatriculation
+      - carte grise
+      - ANTS
+
+  # ---------- Logement ----------
+  - emetteur: Bailleur
+    domaine: Prive
+    destination: Logement
+    type: quittance-loyer
+    mots_cles:
+      - quittance de loyer
+      - loyer
+      - bail
+      - depot de garantie
+
+  # ---------- PRO : Social / URSSAF ----------
+  - emetteur: URSSAF
+    domaine: Pro
+    destination: Social-URSSAF
+    type: cotisations-sociales
+    mots_cles:
+      - URSSAF
+      - cotisations sociales
+      - travailleur independant
+      - appel de cotisations
+
+  # ---------- PRO : Impôts / TVA ----------
+  - emetteur: DGFiP-Pro
+    domaine: Pro
+    destination: Impots-TVA
+    type: declaration-tva
+    mots_cles:
+      - TVA
+      - declaration de TVA
+      - numero de TVA intracommunautaire
+      - CA3
