@@ -1,0 +1,9 @@
+# Dépendances du script trier_documents.py
+# Installation :  pip install -r requirements.txt
+
+pdfplumber>=0.11   # lecture et extraction du texte des PDF
+PyYAML>=6.0        # lecture du fichier de règles regles.yaml
+
+# reportlab n'est utile QUE pour générer les PDF de test (generer_pdf_test.py).
+# Tu peux le retirer si tu n'en as pas besoin.
+reportlab>=4.0
