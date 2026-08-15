@@ -39,6 +39,7 @@ echo Fabrication de l'exe (cela peut prendre 1 a 2 minutes)...
     --name "TriDocuments" ^
     --collect-all sv_ttk ^
     --collect-all tkinterdnd2 ^
+    --hidden-import moteur_ia ^
     trier_documents_gui.py
 
 if errorlevel 1 (

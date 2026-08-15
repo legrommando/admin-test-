@@ -698,13 +698,14 @@ def annuler_operations(base, dernier_lot_seulement=False, journaliser=print):
 # Version « ligne de commande » : afficher l'aperçu et (option) appliquer
 # =============================================================================
 
-def traiter_dossier(base, regles, mode_execute):
+def traiter_dossier(base, regles, mode_execute, moteur="regles"):
     """Parcourt _a_trier et classe chaque PDF (ou simule le classement).
 
     Paramètres :
       - base         : chemin du dossier Administration
       - regles       : les règles chargées depuis regles.yaml
       - mode_execute : True = on déplace vraiment ; False = simulation
+      - moteur       : "regles" (mots-clés, par défaut) ou "ia" (IA locale)
 
     Cette fonction s'appuie entièrement sur le cœur réutilisable ci-dessus :
     elle se contente d'afficher les résultats dans le terminal.
@@ -712,9 +713,22 @@ def traiter_dossier(base, regles, mode_execute):
     base = Path(base)
     chemin_journal = base / FICHIER_JOURNAL
 
+    # Choix du moteur d'analyse. Le moteur "ia" est optionnel : s'il n'est pas
+    # disponible (Ollama absent), on retombe automatiquement sur les mots-clés.
+    fonction_analyse = analyser_dossier
+    if moteur == "ia":
+        import moteur_ia   # importé seulement si demandé (dépendance optionnelle)
+        disponible, message = moteur_ia.ollama_disponible()
+        if disponible:
+            print(f">>> Moteur : IA locale. {message}\n")
+            fonction_analyse = lambda b, r: moteur_ia.analyser_dossier_ia(b, r)
+        else:
+            print(f">>> IA locale indisponible : {message}")
+            print(">>> Repli sur le moteur par mots-clés.\n")
+
     # Étape 1 : analyser (aucun fichier n'est touché ici).
     try:
-        operations = analyser_dossier(base, regles)
+        operations = fonction_analyse(base, regles)
     except FileNotFoundError as chemin_manquant:
         print(f"Erreur : le dossier '{chemin_manquant}' n'existe pas.")
         print("Crée-le et déposes-y tes PDF, puis relance le script.")
@@ -842,6 +856,12 @@ def main():
         action="store_true",
         help="Avec --annuler : n'annule que le dernier classement (dernier lot).",
     )
+    analyseur.add_argument(
+        "--moteur",
+        choices=["regles", "ia"],
+        default="regles",
+        help="Moteur d'analyse : 'regles' (mots-clés, défaut) ou 'ia' (IA locale Ollama).",
+    )
     options = analyseur.parse_args()
 
     base = Path(options.base)
@@ -853,7 +873,7 @@ def main():
 
     # Cas 2 : classement (simulation par défaut, réel avec --execute).
     regles = charger_regles(options.regles)
-    traiter_dossier(base, regles, mode_execute=options.execute)
+    traiter_dossier(base, regles, mode_execute=options.execute, moteur=options.moteur)
 
 
 # Cette ligne classique fait que main() ne s'exécute que si on lance
