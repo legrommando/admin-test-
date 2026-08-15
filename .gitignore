@@ -8,3 +8,11 @@ journal.csv
 # Fichiers Python temporaires
 __pycache__/
 *.pyc
+
+# Fichiers créés lors de la fabrication de l'exe (PyInstaller)
+build/
+dist/
+*.spec
+
+# Préférences locales du logiciel (dossier/thème mémorisés)
+.trier_documents.json

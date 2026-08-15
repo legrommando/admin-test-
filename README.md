@@ -41,19 +41,32 @@ pip install -r requirements.txt
 
 ### Utiliser, en 3 boutons
 
-1. **« 1. Analyser (aperçu) »** — le logiciel lit les PDF de `_a_trier` et
+1. **« ① Analyser (aperçu) »** — le logiciel lit les PDF de `_a_trier` et
    affiche dans un tableau ce qu'il compte faire (émetteur, dossier de
    rangement, date, nouveau nom). **Rien n'est déplacé** à cette étape.
-   Les documents non reconnus apparaissent surlignés (ils iront dans
-   `_non_classe`, sans être renommés).
-2. **« 2. Classer les fichiers ▶ »** — après une confirmation, il déplace et
+   Les documents non reconnus apparaissent surlignés en orange (ils iront
+   dans `_non_classe`, sans être renommés).
+2. **« ② Classer les fichiers »** — après une confirmation, il déplace et
    renomme réellement les fichiers, et note tout dans le journal.
-3. **« ↩ Annuler le dernier classement »** — remet chaque fichier du dernier
-   classement à son emplacement et son nom d'origine.
+3. **« ↩ Annuler le dernier classement »** — remet les fichiers **du dernier
+   classement** (le dernier « lot ») à leur emplacement et nom d'origine.
+   Si tu as classé plusieurs fois, seul le dernier classement est annulé.
 
-Le bouton **« Changer… »** permet de choisir un autre dossier de travail,
-**« Ouvrir »** l'ouvre dans l'explorateur de fichiers, et le bouton en haut à
-droite bascule entre **thème clair et thème sombre**.
+### Les petits plus de confort
+
+- **➕ Ajouter des PDF…** : choisis des PDF n'importe où sur ton disque, ils
+  sont **copiés** dans `_a_trier` et analysés aussitôt. Tu peux aussi les
+  **glisser-déposer** directement dans la fenêtre (si `tkinterdnd2` est présent).
+- **✏️ Corriger un classement** : **double-clique sur une ligne** du tableau
+  pour choisir toi-même la catégorie et la date — pratique quand le logiciel
+  se trompe, ou pour rattraper un document `_non_classe`.
+- **🔍 Documents scannés** : si l'OCR est installé (voir section 4), les PDF
+  qui sont des images sont lus quand même ; ils sont repérés par une petite
+  loupe 🔍 dans le tableau.
+- **🌙 Thème clair / sombre** : le bouton en haut à droite. Ton choix est
+  **mémorisé**, tout comme le **dernier dossier** utilisé.
+- **« Changer… »** choisit un autre dossier de travail, **« Ouvrir »** l'ouvre
+  dans l'explorateur de fichiers.
 
 L'apparence moderne (style Windows 11) est fournie par le composant **sv-ttk**,
 installé automatiquement par `Lancer_le_logiciel.bat`. S'il venait à manquer,
@@ -98,11 +111,46 @@ python3 trier_documents.py --annuler
 ```
 
 Le script relit `journal.csv` et replace chaque fichier à son emplacement
-d'origine (sans jamais rien écraser).
+d'origine (sans jamais rien écraser). Ajoute **`--dernier`** pour n'annuler
+que le dernier classement : `python3 trier_documents.py --annuler --dernier`.
 
 ---
 
-## 4. Nom des fichiers rangés
+## 4. Lire les documents scannés (OCR) — facultatif
+
+Beaucoup de courriers administratifs sont des **scans** : ce sont des images,
+sans texte. Sans OCR, ces PDF finissent dans `_non_classe`. Pour les lire :
+
+1. **Installer le logiciel Tesseract** (le moteur d'OCR) :
+   - **Windows** : télécharge l'installateur **tesseract-ocr-w64** (paquet
+     « UB Mannheim »), et pendant l'installation, coche la **langue française**.
+   - **macOS** : `brew install tesseract tesseract-lang`
+   - **Linux** : `sudo apt install tesseract-ocr tesseract-ocr-fra`
+2. Le composant Python `pytesseract` est déjà dans `requirements.txt` (donc
+   installé par `Lancer_le_logiciel.bat`).
+
+C'est tout : au prochain lancement, le journal affichera *« OCR disponible »*
+et les scans seront lus. **Si tu n'installes pas Tesseract, rien ne casse** :
+seuls les scans ne sont pas reconnus.
+
+## 5. Créer un vrai `.exe` (sans installer Python) — facultatif
+
+Pour utiliser le logiciel sur une machine **sans Python**, tu peux fabriquer
+un exécutable autonome :
+
+1. Sur une machine **où Python est installé**, double-clique sur
+   **`Fabriquer_l_exe.bat`**.
+2. Patiente 1–2 minutes. À la fin, tu obtiens **`dist\TriDocuments.exe`** avec
+   `regles.yaml` copié à côté (tu peux l'éditer).
+3. Copie ces deux éléments où tu veux, et **double-clique sur l'exe**. Le
+   dossier `Administration/` sera créé à côté de l'exe.
+
+> L'OCR (Tesseract) reste un logiciel **externe** : il n'est pas inclus dans
+> l'exe. Installe-le à part (section 4) si tu veux lire les scans.
+
+---
+
+## 6. Nom des fichiers rangés
 
 Les documents reconnus sont renommés ainsi :
 
@@ -112,14 +160,16 @@ AAAA-MM-JJ_Emetteur_type-de-document.pdf
 
 Exemple : `2026-03-12_EDF_facture-electricite.pdf`
 
-La date provient du document lui-même (formats reconnus : `12/03/2026`,
-`12 mars 2026`, `2026-03-12`). Si aucune date n'est trouvée, le script
-utilise la date de modification du fichier et **le signale** à l'écran.
+La date provient du document lui-même. Formats reconnus : `2026-03-12`,
+`12/03/2026` (ou `12-03-2026`), `12/03/26` (année sur 2 chiffres),
+`12 mars 2026` et `12 janv. 2026` (mois abrégés). Si aucune date n'est
+trouvée, le logiciel utilise la date de modification du fichier et **le
+signale** (une étoile `*` apparaît à côté de la date dans le tableau).
 
 Un document non reconnu (confiance trop faible) part dans `_non_classe/`
 **sans être renommé**, pour que tu le traites à la main.
 
-## 5. Arborescence cible
+## 7. Arborescence cible
 
 ```
 Administration/
@@ -143,9 +193,10 @@ librement (sans toucher au code). Pour chaque émetteur tu définis :
 
 Une quinzaine d'exemples français (EDF, Engie, URSSAF, DGFiP, Orange, SFR,
 Free, MAIF, AXA, CPAM…) sont déjà fournis : copie un bloc et adapte-le pour
-ajouter les tiens.
+ajouter les tiens. Tu peux aussi corriger un classement au cas par cas
+directement dans la fenêtre (double-clic sur une ligne).
 
-## 7. Fichiers de test
+## 8. Fichiers de test et tests automatisés
 
 Pour essayer l'outil sans risque, génère 3 PDF factices :
 
@@ -156,15 +207,24 @@ python3 trier_documents.py --execute
 python3 trier_documents.py --annuler
 ```
 
-## 8. Contenu du projet
+Pour vérifier que le moteur fonctionne toujours correctement (dates,
+reconnaissance, collisions, annulation par lot) :
+
+```bash
+python3 -m unittest test_trier
+```
+
+## 9. Contenu du projet
 
 | Fichier                    | Rôle                                             |
 |----------------------------|--------------------------------------------------|
 | `trier_documents_gui.py`   | **le logiciel (fenêtre)** — à lancer pour l'interface |
 | `Lancer_le_logiciel.bat`   | raccourci Windows : double-clic pour ouvrir la fenêtre |
+| `Fabriquer_l_exe.bat`      | fabrique un `.exe` autonome (facultatif)         |
 | `trier_documents.py`       | le moteur de tri + la version ligne de commande  |
 | `regles.yaml`              | les règles de classement (éditable)              |
 | `generer_pdf_test.py`      | génère 3 PDF de test                             |
+| `test_trier.py`            | tests automatisés du moteur                      |
 | `requirements.txt`         | les dépendances Python                           |
 | `README.md`                | ce fichier                                       |
 
