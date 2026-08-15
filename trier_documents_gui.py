@@ -74,6 +74,15 @@ except ImportError:
 # --- Notre logique de tri (le fichier voisin trier_documents.py) ---
 import trier_documents as noyau
 
+# --- Moteur IA locale (facultatif) : classement par IA sur ta machine ---
+# Importé dans un try : si le fichier manque, la fenêtre marche quand même
+# avec le seul moteur par mots-clés.
+try:
+    import moteur_ia
+    MOTEUR_IA_DISPO = True
+except Exception:
+    MOTEUR_IA_DISPO = False
+
 
 # Couleurs d'accent (identiques en clair et en sombre, bien contrastées).
 COULEUR_OK = "#2e9e5b"         # vert : reconnu / succès
@@ -104,6 +113,8 @@ class Application(tk.Tk):
         self.operations = []
         self.file_resultats = queue.Queue()
         self.theme_sombre = False
+        # Moteur d'analyse : "regles" (mots-clés) ou "ia" (IA locale).
+        self.moteur = "regles"
 
         # --- Préférences mémorisées (dossier, thème) ---
         self._charger_config()
@@ -129,6 +140,8 @@ class Application(tk.Tk):
                 if dossier and Path(dossier).exists():
                     self.base = Path(dossier)
                 self.theme_sombre = bool(donnees.get("theme_sombre", False))
+                if donnees.get("moteur") in ("regles", "ia"):
+                    self.moteur = donnees["moteur"]
         except Exception:
             pass  # des préférences illisibles ne doivent pas bloquer le logiciel
 
@@ -138,6 +151,7 @@ class Application(tk.Tk):
             FICHIER_CONFIG.write_text(json.dumps({
                 "dernier_dossier": str(self.base),
                 "theme_sombre": self.theme_sombre,
+                "moteur": self.moteur,
             }, indent=2), encoding="utf-8")
         except Exception:
             pass
@@ -194,6 +208,23 @@ class Application(tk.Tk):
         """Teinte discrète pour une ligne sur deux (selon clair/sombre)."""
         return "#2a2a2a" if self.theme_sombre else "#f3f4f6"
 
+    def _changer_moteur(self, evenement=None):
+        """Change le moteur d'analyse (mots-clés ou IA locale) et le mémorise."""
+        self.moteur = self._libelles_moteur.get(self.var_moteur.get(), "regles")
+        self._sauver_config()
+        if self.moteur == "ia":
+            if not MOTEUR_IA_DISPO:
+                self._message("Le moteur IA locale n'est pas disponible "
+                              "(fichier moteur_ia.py manquant).")
+                return
+            # On informe tout de suite si Ollama répond ou non.
+            disponible, message = moteur_ia.ollama_disponible()
+            self._message("IA locale : " + message)
+            if not disponible:
+                self._message("→ Sans Ollama, l'analyse retombera sur les mots-clés.")
+        else:
+            self._message("Méthode d'analyse : mots-clés (hors-ligne).")
+
     # =========================================================================
     # Construction de l'interface
     # =========================================================================
@@ -235,6 +266,25 @@ class Application(tk.Tk):
                    command=self._choisir_dossier).pack(side="left", padx=(8, 0))
         ttk.Button(ligne_dossier, text="📁  Ouvrir", width=10,
                    command=self._ouvrir_dossier).pack(side="left", padx=(8, 0))
+
+        # ---------- CHOIX DU MOTEUR D'ANALYSE ----------
+        cadre_moteur = ttk.Frame(self, padding=(20, 8, 20, 0))
+        cadre_moteur.pack(fill="x")
+        ttk.Label(cadre_moteur, text="Méthode d'analyse :").pack(side="left")
+
+        # Libellés affichés <-> codes internes.
+        self._libelles_moteur = {
+            "Mots-clés (rapide, hors-ligne)": "regles",
+            "IA locale (privée, lit les scans)": "ia",
+        }
+        libelle_actuel = next(lib for lib, code in self._libelles_moteur.items()
+                              if code == self.moteur)
+        self.var_moteur = tk.StringVar(value=libelle_actuel)
+        liste_moteur = ttk.Combobox(
+            cadre_moteur, textvariable=self.var_moteur, state="readonly", width=34,
+            values=list(self._libelles_moteur.keys()))
+        liste_moteur.pack(side="left", padx=(8, 0))
+        liste_moteur.bind("<<ComboboxSelected>>", self._changer_moteur)
 
         # ---------- ACTIONS ----------
         cadre_actions = ttk.Frame(self, padding=(20, 10, 20, 4))
@@ -482,14 +532,35 @@ class Application(tk.Tk):
             if fichiers is None:
                 self.file_resultats.put(("dossier_absent", None))
                 return
+
+            # On choisit le moteur : IA locale si demandé ET disponible,
+            # sinon mots-clés (repli automatique, jamais de blocage).
+            analyser = self._choisir_analyseur()
+
             operations = []
             total = len(fichiers)
             for i, chemin in enumerate(fichiers, start=1):
-                operations.append(noyau.analyser_fichier(chemin, self.regles, self.base))
+                operations.append(analyser(chemin))
                 self.file_resultats.put(("progres", (i, total, chemin.name)))
             self.file_resultats.put(("ok", operations))
         except Exception as erreur:
             self.file_resultats.put(("erreur", str(erreur)))
+
+    def _choisir_analyseur(self):
+        """Retourne la fonction d'analyse d'UN fichier selon le moteur choisi.
+
+        Toutes deux renvoient la même « forme » d'opération, donc la suite du
+        programme ne change pas. En cas d'IA indisponible, on retombe sur les
+        mots-clés en le signalant dans le journal.
+        """
+        if self.moteur == "ia" and MOTEUR_IA_DISPO:
+            disponible, message = moteur_ia.ollama_disponible()
+            if disponible:
+                self.file_resultats.put(("info", "Analyse par IA locale : " + message))
+                return lambda p: moteur_ia.analyser_fichier_ia(p, self.regles, self.base)
+            self.file_resultats.put(
+                ("info", "IA locale indisponible, repli sur les mots-clés : " + message))
+        return lambda p: noyau.analyser_fichier(p, self.regles, self.base)
 
     def _verifier_file_analyse(self):
         """Récupère (dans le fil principal) ce que le thread a déposé."""
@@ -500,6 +571,9 @@ class Application(tk.Tk):
                     i, total, nom = donnee
                     self.var_progres.set(100 * i / total if total else 0)
                     self._etat(f"Analyse : {i}/{total} — {nom}")
+                elif type_resultat == "info":
+                    # Message d'information (ex : moteur utilisé) ; on continue.
+                    self._message(donnee)
                 elif type_resultat == "ok":
                     self._analyse_terminee(donnee)
                     return

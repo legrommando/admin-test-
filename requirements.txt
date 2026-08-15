@@ -22,4 +22,9 @@ reportlab>=4.0
 #        FACULTATIF : sans lui, tout marche, seuls les scans ne sont pas lus.
 #        Windows : installateur « tesseract-ocr-w64 » (UB Mannheim) + langue
 #        française. Voir la section OCR du README.
+#
+# NB 3 : le moteur « IA locale » (facultatif) parle à Ollama via le réseau
+#        local avec urllib (inclus dans Python) — AUCUN paquet pip à ajouter.
+#        Il faut seulement installer le logiciel Ollama + un modèle (voir la
+#        section « IA locale » du README). Sans lui, on retombe sur les mots-clés.
 

@@ -133,7 +133,42 @@ C'est tout : au prochain lancement, le journal affichera *« OCR disponible »*
 et les scans seront lus. **Si tu n'installes pas Tesseract, rien ne casse** :
 seuls les scans ne sont pas reconnus.
 
-## 5. Créer un vrai `.exe` (sans installer Python) — facultatif
+> 💡 Le moteur **IA locale** (section ci-dessous) lit lui aussi les scans, sans
+> Tesseract. Si tu utilises l'IA locale, tu n'as pas besoin de l'OCR.
+
+## 5. IA locale (privée) — facultatif
+
+Au lieu de reconnaître les documents par mots-clés, le logiciel peut les faire
+**comprendre par une IA qui tourne sur TON ordinateur**. Rien n'est envoyé sur
+Internet : tes documents restent chez toi. L'IA « à vision » lit aussi bien les
+PDF texte que les **scans** (pas besoin d'OCR), et devine l'émetteur, la
+catégorie, la date et le type — sans que tu aies à écrire de règles.
+
+### Installer l'IA locale (une fois)
+
+1. Installe **Ollama** (le logiciel qui fait tourner l'IA) depuis
+   **https://ollama.com** → *Download* → version Windows.
+2. Ouvre l'Invite de commandes et télécharge un modèle « à vision » :
+   ```
+   ollama pull llama3.2-vision
+   ```
+   (≈ 6 Go ; il te faut un PC avec assez de mémoire — 8 Go de RAM minimum,
+   une carte graphique récente aide beaucoup.)
+
+### Utiliser
+
+- **Dans la fenêtre** : choisis **« IA locale (privée) »** dans la liste
+  **« Méthode d'analyse »**, puis clique **Analyser** comme d'habitude.
+- **En ligne de commande** : `python trier_documents.py --moteur ia`
+
+Le journal indique si l'IA répond. **Si Ollama n'est pas lancé, le logiciel
+retombe tout seul sur les mots-clés** — rien ne casse. Ton choix de méthode
+est mémorisé d'une fois sur l'autre.
+
+> ⚙️ Modèle plus léger si ton PC est modeste : `ollama pull moondream` (~1,7 Go,
+> moins précis). Tu peux changer le modèle par défaut en haut de `moteur_ia.py`.
+
+## 6. Créer un vrai `.exe` (sans installer Python) — facultatif
 
 Pour utiliser le logiciel sur une machine **sans Python**, tu peux fabriquer
 un exécutable autonome :
@@ -150,7 +185,7 @@ un exécutable autonome :
 
 ---
 
-## 6. Nom des fichiers rangés
+## 7. Nom des fichiers rangés
 
 Les documents reconnus sont renommés ainsi :
 
@@ -169,7 +204,7 @@ signale** (une étoile `*` apparaît à côté de la date dans le tableau).
 Un document non reconnu (confiance trop faible) part dans `_non_classe/`
 **sans être renommé**, pour que tu le traites à la main.
 
-## 7. Arborescence cible
+## 8. Arborescence cible
 
 ```
 Administration/
@@ -181,7 +216,7 @@ Administration/
                           Social-URSSAF, Impots-TVA, Divers
 ```
 
-## 6. Personnaliser le classement
+## 9. Personnaliser le classement
 
 Toutes les règles sont dans **`regles.yaml`**, que tu peux modifier
 librement (sans toucher au code). Pour chaque émetteur tu définis :
@@ -196,7 +231,7 @@ Free, MAIF, AXA, CPAM…) sont déjà fournis : copie un bloc et adapte-le pour
 ajouter les tiens. Tu peux aussi corriger un classement au cas par cas
 directement dans la fenêtre (double-clic sur une ligne).
 
-## 8. Fichiers de test et tests automatisés
+## 10. Fichiers de test et tests automatisés
 
 Pour essayer l'outil sans risque, génère 3 PDF factices :
 
@@ -214,17 +249,19 @@ reconnaissance, collisions, annulation par lot) :
 python3 -m unittest test_trier
 ```
 
-## 9. Contenu du projet
+## 11. Contenu du projet
 
 | Fichier                    | Rôle                                             |
 |----------------------------|--------------------------------------------------|
 | `trier_documents_gui.py`   | **le logiciel (fenêtre)** — à lancer pour l'interface |
 | `Lancer_le_logiciel.bat`   | raccourci Windows : double-clic pour ouvrir la fenêtre |
 | `Fabriquer_l_exe.bat`      | fabrique un `.exe` autonome (facultatif)         |
-| `trier_documents.py`       | le moteur de tri + la version ligne de commande  |
+| `trier_documents.py`       | le moteur de tri (mots-clés) + la version ligne de commande |
+| `moteur_ia.py`             | moteur **IA locale** (Ollama), facultatif        |
 | `regles.yaml`              | les règles de classement (éditable)              |
 | `generer_pdf_test.py`      | génère 3 PDF de test                             |
 | `test_trier.py`            | tests automatisés du moteur                      |
+| `test_moteur_ia.py`        | tests du moteur IA (faux serveur Ollama)         |
 | `requirements.txt`         | les dépendances Python                           |
 | `README.md`                | ce fichier                                       |
 
