@@ -51,13 +51,13 @@ pip install -r requirements.txt
 3. **« ↩ Annuler le dernier classement »** — remet chaque fichier du dernier
    classement à son emplacement et son nom d'origine.
 
-Le bouton **« Changer… »** permet de choisir un autre dossier de travail, et
-**« Ouvrir le dossier »** l'ouvre dans l'explorateur de fichiers.
+Le bouton **« Changer… »** permet de choisir un autre dossier de travail,
+**« Ouvrir »** l'ouvre dans l'explorateur de fichiers, et le bouton en haut à
+droite bascule entre **thème clair et thème sombre**.
 
-Voici à quoi ressemble la fenêtre après un clic sur « Analyser » :
-
-> *(capture d'écran : le tableau liste chaque PDF avec l'émetteur détecté,
-> le dossier de rangement, la date et le nouveau nom.)*
+L'apparence moderne (style Windows 11) est fournie par le composant **sv-ttk**,
+installé automatiquement par `Lancer_le_logiciel.bat`. S'il venait à manquer,
+le logiciel fonctionne quand même avec l'apparence classique — rien ne bloque.
 
 ## 3. La ligne de commande (variante terminal)
 

@@ -1,24 +1,27 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-trier_documents_gui.py — Interface graphique (fenêtre) pour le tri des PDF.
+trier_documents_gui.py — Interface graphique moderne pour le tri des PDF.
 
 C'est la version « logiciel » de trier_documents.py : au lieu de taper des
 commandes, tu utilises une fenêtre avec des boutons.
 
 Comment ça marche, en 3 boutons :
-    1. « Analyser »  : le logiciel regarde les PDF de _a_trier et affiche,
-                       dans un tableau, ce qu'il compte faire. RIEN n'est
-                       déplacé à cette étape (c'est un aperçu).
-    2. « Classer »   : après confirmation, il déplace réellement les fichiers
-                       vers Prive/... et Pro/..., et note tout dans le journal.
-    3. « Annuler »   : remet les fichiers du dernier classement à leur place.
+    1. « Analyser » : le logiciel regarde les PDF de _a_trier et affiche,
+                      dans un tableau, ce qu'il compte faire. RIEN n'est
+                      déplacé à cette étape (c'est un aperçu).
+    2. « Classer »  : après confirmation, il déplace réellement les fichiers
+                      vers Prive/... et Pro/..., et note tout dans le journal.
+    3. « Annuler »  : remet les fichiers du dernier classement à leur place.
 
 Lancement :
-    python trier_documents.py            (ça, c'est la version terminal)
-    python trier_documents_gui.py        (ça, c'est cette fenêtre)
+    python trier_documents_gui.py        (ou double-clic sur Lancer_le_logiciel.bat)
 
-Aucune dépendance en plus : tkinter (la fenêtre) est inclus dans Python.
+Apparence :
+    Le logiciel utilise un thème moderne (sv-ttk, style Windows 11) s'il est
+    installé, avec un mode clair/sombre. S'il n'est pas là, il fonctionne
+    quand même avec l'apparence classique : rien ne bloque.
+
 Le logiciel réutilise toute la logique de tri de trier_documents.py :
 il n'y a donc qu'une seule « vraie » façon de classer, partagée par les deux.
 """
@@ -31,157 +34,247 @@ from pathlib import Path
 try:
     import tkinter as tk
     from tkinter import ttk, filedialog, messagebox, scrolledtext
+    from tkinter import font as tkfont
 except ImportError:
-    # Cas très rare : certaines installations Python minimales n'ont pas tkinter.
     print("Erreur : le module 'tkinter' n'est pas disponible dans ton Python.")
     print("Sous Windows/Mac, réinstalle Python depuis python.org (tkinter est inclus).")
     print("Sous Linux, installe le paquet 'python3-tk'.")
     raise SystemExit(1)
 
+# --- Thème moderne (facultatif) : sv-ttk donne un look « Windows 11 » ---
+# On l'importe dans un try : s'il n'est pas installé, le logiciel marche
+# quand même avec l'apparence classique de tkinter.
+try:
+    import sv_ttk
+    THEME_MODERNE_DISPO = True
+except ImportError:
+    THEME_MODERNE_DISPO = False
+
 # --- Import de notre logique de tri (le fichier voisin trier_documents.py) ---
-# On lui donne le petit surnom « noyau » (le cœur du programme).
 import trier_documents as noyau
 
 
-class Application(tk.Tk):
-    """La fenêtre principale du logiciel.
+# Couleurs utilisées pour les petits repères de couleur (identiques en clair
+# et en sombre, car ce sont des couleurs « d'accent » bien contrastées).
+COULEUR_OK = "#2e9e5b"        # vert : documents reconnus / succès
+COULEUR_ATTENTION = "#d98a00"  # orange : documents à vérifier
+COULEUR_DISCRET = "#8a8a8a"    # gris : informations secondaires
 
-    Hérite de tk.Tk, la fenêtre de base de tkinter. Tout le contenu
-    (boutons, tableau, journal) est créé dans __init__.
-    """
+
+class Application(tk.Tk):
+    """La fenêtre principale du logiciel (version moderne)."""
 
     def __init__(self):
         super().__init__()
 
         # --- Réglages de la fenêtre ---
         self.title("Tri des documents administratifs")
-        self.geometry("980x640")     # largeur x hauteur au démarrage
-        self.minsize(820, 520)       # taille minimale pour rester lisible
+        self.geometry("1040x720")
+        self.minsize(880, 600)
 
         # --- Variables internes ---
-        # Dossier de travail par défaut : « Administration » à côté du script.
         dossier_du_script = Path(__file__).resolve().parent
         self.base = dossier_du_script / noyau.DOSSIER_RACINE
         self.chemin_regles = dossier_du_script / noyau.FICHIER_REGLES
 
-        # Les règles de classement (chargées au démarrage).
         self.regles = None
-        # La liste des opérations calculées par la dernière analyse.
         self.operations = []
-        # File d'attente utilisée pour recevoir, sans risque, le résultat
-        # de l'analyse faite dans le thread (voir _lancer_analyse).
         self.file_resultats = queue.Queue()
+        self.theme_sombre = False   # on démarre en clair
 
-        # On construit l'interface, puis on charge les règles.
+        # --- Apparence : polices et thème ---
+        self._preparer_apparence()
+
+        # --- Construction de l'interface, puis chargement des règles ---
         self._construire_interface()
         self._charger_regles_au_demarrage()
 
     # -------------------------------------------------------------------------
-    # Construction de l'interface (les différentes zones de la fenêtre)
+    # Apparence (thème + polices + styles du tableau)
+    # -------------------------------------------------------------------------
+    def _preparer_apparence(self):
+        """Applique le thème moderne et prépare les polices."""
+        # Police de base : Segoe UI sous Windows (moderne), sinon la police
+        # par défaut. On règle une taille un peu plus grande pour le confort.
+        familles = set(tkfont.families())
+        famille = "Segoe UI" if "Segoe UI" in familles else \
+                  ("Helvetica" if "Helvetica" in familles else "TkDefaultFont")
+
+        self.police_base = (famille, 10)
+        self.police_titre = (famille, 18, "bold")
+        self.police_sous_titre = (famille, 10)
+        self.police_bouton = (famille, 10)
+        self.police_tableau = (famille, 10)
+        self.police_entete = (famille, 10, "bold")
+
+        # Police par défaut de toute la fenêtre.
+        try:
+            defaut = tkfont.nametofont("TkDefaultFont")
+            defaut.configure(family=famille, size=10)
+            self.option_add("*Font", defaut)
+        except tk.TclError:
+            pass
+
+        # Thème moderne si disponible.
+        if THEME_MODERNE_DISPO:
+            sv_ttk.set_theme("light")
+
+        # Réglages fins du tableau (lignes plus hautes, en-têtes en gras).
+        style = ttk.Style(self)
+        style.configure("Treeview", rowheight=30, font=self.police_tableau)
+        style.configure("Treeview.Heading", font=self.police_entete)
+
+    def _basculer_theme(self):
+        """Passe du mode clair au mode sombre (et inversement)."""
+        if not THEME_MODERNE_DISPO:
+            messagebox.showinfo(
+                "Thème",
+                "Le mode sombre nécessite le composant « sv-ttk ».\n"
+                "Il s'installe tout seul via Lancer_le_logiciel.bat.")
+            return
+        self.theme_sombre = not self.theme_sombre
+        sv_ttk.set_theme("dark" if self.theme_sombre else "light")
+        self.bouton_theme.configure(text="☀  Clair" if self.theme_sombre else "🌙  Sombre")
+        # La couleur du zébrage (une ligne sur deux) dépend du mode clair/sombre :
+        # on la remet à jour pour éviter une bande claire en mode sombre.
+        self.tableau.tag_configure("impair", background=self._couleur_zebre())
+
+    # -------------------------------------------------------------------------
+    # Construction de l'interface
     # -------------------------------------------------------------------------
     def _construire_interface(self):
         """Crée et dispose tous les éléments visuels de la fenêtre."""
 
-        # ----- Zone du haut : choix du dossier -----
-        cadre_haut = ttk.Frame(self, padding=10)
-        cadre_haut.pack(fill="x")
+        # ============ EN-TÊTE : titre + bouton thème ============
+        entete = ttk.Frame(self, padding=(20, 16, 20, 8))
+        entete.pack(fill="x")
 
-        ttk.Label(cadre_haut, text="Dossier de travail :").pack(side="left")
+        bloc_titre = ttk.Frame(entete)
+        bloc_titre.pack(side="left")
+        ttk.Label(bloc_titre, text="🗂  Tri des documents administratifs",
+                  font=self.police_titre).pack(anchor="w")
+        ttk.Label(bloc_titre,
+                  text="Range automatiquement tes PDF dans Privé / Pro.",
+                  font=self.police_sous_titre,
+                  foreground=COULEUR_DISCRET).pack(anchor="w")
 
-        # Un champ (non modifiable à la main) qui montre le dossier choisi.
+        self.bouton_theme = ttk.Button(entete, text="🌙  Sombre", width=10,
+                                       command=self._basculer_theme)
+        self.bouton_theme.pack(side="right", anchor="n")
+
+        ttk.Separator(self, orient="horizontal").pack(fill="x", padx=20)
+
+        # ============ LIGNE : dossier de travail ============
+        cadre_dossier = ttk.Frame(self, padding=(20, 12, 20, 4))
+        cadre_dossier.pack(fill="x")
+
+        ttk.Label(cadre_dossier, text="Dossier de travail",
+                  foreground=COULEUR_DISCRET).pack(anchor="w")
+
+        ligne_dossier = ttk.Frame(cadre_dossier)
+        ligne_dossier.pack(fill="x", pady=(4, 0))
+
         self.var_dossier = tk.StringVar(value=str(self.base))
-        champ = ttk.Entry(cadre_haut, textvariable=self.var_dossier, state="readonly")
-        champ.pack(side="left", fill="x", expand=True, padx=8)
+        ttk.Entry(ligne_dossier, textvariable=self.var_dossier,
+                  state="readonly").pack(side="left", fill="x", expand=True)
+        ttk.Button(ligne_dossier, text="📂  Changer…", width=12,
+                   command=self._choisir_dossier).pack(side="left", padx=(8, 0))
+        ttk.Button(ligne_dossier, text="📁  Ouvrir", width=10,
+                   command=self._ouvrir_dossier).pack(side="left", padx=(8, 0))
 
-        ttk.Button(cadre_haut, text="Changer…",
-                   command=self._choisir_dossier).pack(side="left")
-
-        # ----- Zone des boutons d'action -----
-        cadre_actions = ttk.Frame(self, padding=(10, 0, 10, 10))
+        # ============ LIGNE : les 3 actions ============
+        cadre_actions = ttk.Frame(self, padding=(20, 10, 20, 6))
         cadre_actions.pack(fill="x")
 
+        # Le bouton « Analyser » est mis en avant (style Accent si dispo).
+        style_accent = "Accent.TButton" if THEME_MODERNE_DISPO else "TButton"
+
         self.bouton_analyser = ttk.Button(
-            cadre_actions, text="1. Analyser (aperçu)",
-            command=self._lancer_analyse)
-        self.bouton_analyser.pack(side="left")
+            cadre_actions, text="①  🔍  Analyser (aperçu)",
+            style=style_accent, command=self._lancer_analyse)
+        self.bouton_analyser.pack(side="left", ipady=4)
 
         self.bouton_classer = ttk.Button(
-            cadre_actions, text="2. Classer les fichiers ▶",
+            cadre_actions, text="②  📦  Classer les fichiers",
             command=self._classer, state="disabled")
-        self.bouton_classer.pack(side="left", padx=8)
+        self.bouton_classer.pack(side="left", padx=10, ipady=4)
 
         self.bouton_annuler = ttk.Button(
-            cadre_actions, text="↩ Annuler le dernier classement",
+            cadre_actions, text="↩  Annuler le dernier classement",
             command=self._annuler)
-        self.bouton_annuler.pack(side="left")
+        self.bouton_annuler.pack(side="left", ipady=4)
 
-        ttk.Button(cadre_actions, text="Ouvrir le dossier",
-                   command=self._ouvrir_dossier).pack(side="right")
-
-        # ----- Zone centrale : le tableau des résultats -----
-        cadre_tableau = ttk.Frame(self, padding=(10, 0, 10, 10))
+        # ============ TABLEAU des résultats ============
+        cadre_tableau = ttk.Frame(self, padding=(20, 6, 20, 6))
         cadre_tableau.pack(fill="both", expand=True)
 
-        colonnes = ("fichier", "emetteur", "categorie", "date", "confiance", "nouveau_nom")
-        self.tableau = ttk.Treeview(
-            cadre_tableau, columns=colonnes, show="headings", height=12)
+        colonnes = ("statut", "fichier", "emetteur", "categorie", "date", "nouveau_nom")
+        self.tableau = ttk.Treeview(cadre_tableau, columns=colonnes,
+                                    show="headings", height=12)
 
-        # Titre et largeur de chaque colonne.
+        self.tableau.heading("statut", text="")
         self.tableau.heading("fichier", text="Fichier d'origine")
         self.tableau.heading("emetteur", text="Émetteur")
         self.tableau.heading("categorie", text="Rangé dans")
         self.tableau.heading("date", text="Date")
-        self.tableau.heading("confiance", text="Confiance")
         self.tableau.heading("nouveau_nom", text="Nouveau nom")
 
-        self.tableau.column("fichier", width=180)
-        self.tableau.column("emetteur", width=90, anchor="center")
-        self.tableau.column("categorie", width=150)
-        self.tableau.column("date", width=90, anchor="center")
-        self.tableau.column("confiance", width=75, anchor="center")
-        self.tableau.column("nouveau_nom", width=280)
+        self.tableau.column("statut", width=40, anchor="center", stretch=False)
+        self.tableau.column("fichier", width=200)
+        self.tableau.column("emetteur", width=100, anchor="center")
+        self.tableau.column("categorie", width=170)
+        self.tableau.column("date", width=100, anchor="center")
+        self.tableau.column("nouveau_nom", width=300)
 
-        # Une couleur douce pour repérer d'un coup d'œil les documents
-        # non reconnus (qui iront dans _non_classe sans être renommés).
-        self.tableau.tag_configure("non_classe", background="#ffe9d6")
+        # Couleurs des lignes : reconnu (normal), à vérifier (orange), et
+        # une teinte alternée discrète pour lire plus facilement (zébrage).
+        self.tableau.tag_configure("nonclasse", foreground=COULEUR_ATTENTION)
+        self.tableau.tag_configure("impair", background=self._couleur_zebre())
 
-        # Barre de défilement verticale pour le tableau.
         barre = ttk.Scrollbar(cadre_tableau, orient="vertical",
-                              command=self.tableau.yview)
+                             command=self.tableau.yview)
         self.tableau.configure(yscrollcommand=barre.set)
         self.tableau.pack(side="left", fill="both", expand=True)
         barre.pack(side="right", fill="y")
 
-        # ----- Zone du bas : journal des messages + barre d'état -----
-        cadre_bas = ttk.Frame(self, padding=(10, 0, 10, 10))
+        # ============ JOURNAL des messages ============
+        cadre_bas = ttk.Frame(self, padding=(20, 0, 20, 6))
         cadre_bas.pack(fill="both")
 
-        ttk.Label(cadre_bas, text="Messages :").pack(anchor="w")
+        ttk.Label(cadre_bas, text="Journal",
+                  foreground=COULEUR_DISCRET).pack(anchor="w")
         self.zone_messages = scrolledtext.ScrolledText(
-            cadre_bas, height=7, state="disabled", wrap="word")
-        self.zone_messages.pack(fill="both", expand=True)
+            cadre_bas, height=6, state="disabled", wrap="word",
+            font=(self.police_base[0], 9), relief="flat", borderwidth=1)
+        self.zone_messages.pack(fill="both", expand=True, pady=(4, 0))
 
-        # Barre d'état tout en bas (une petite ligne d'information).
+        # ============ BARRE D'ÉTAT ============
         self.var_etat = tk.StringVar(value="Prêt.")
-        ttk.Label(self, textvariable=self.var_etat, relief="sunken",
-                  anchor="w", padding=4).pack(fill="x", side="bottom")
+        self.label_etat = ttk.Label(self, textvariable=self.var_etat,
+                                    anchor="w", padding=(20, 6))
+        self.label_etat.pack(fill="x", side="bottom")
+
+    def _couleur_zebre(self):
+        """Teinte discrète pour une ligne sur deux (selon clair/sombre)."""
+        return "#2a2a2a" if self.theme_sombre else "#f3f4f6"
 
     # -------------------------------------------------------------------------
-    # Petites aides pour écrire des messages et changer l'état
+    # Aides : messages, état
     # -------------------------------------------------------------------------
     def _message(self, texte):
-        """Ajoute une ligne dans la zone de messages du bas."""
+        """Ajoute une ligne dans le journal du bas."""
         self.zone_messages.configure(state="normal")
         self.zone_messages.insert("end", texte + "\n")
-        self.zone_messages.see("end")          # on fait défiler vers le bas
+        self.zone_messages.see("end")
         self.zone_messages.configure(state="disabled")
 
-    def _etat(self, texte):
-        """Change le texte de la barre d'état (tout en bas)."""
+    def _etat(self, texte, couleur=None):
+        """Change le texte (et éventuellement la couleur) de la barre d'état."""
         self.var_etat.set(texte)
+        self.label_etat.configure(foreground=couleur if couleur else "")
 
     # -------------------------------------------------------------------------
-    # Chargement des règles de classement
+    # Chargement des règles
     # -------------------------------------------------------------------------
     def _charger_regles_au_demarrage(self):
         """Lit regles.yaml au lancement et prévient si un souci survient."""
@@ -190,9 +283,10 @@ class Application(tk.Tk):
             nb = len(self.regles.get("emetteurs", []))
             self._message(f"Règles chargées : {nb} émetteurs connus "
                           f"(fichier {self.chemin_regles.name}).")
+            if not THEME_MODERNE_DISPO:
+                self._message("Astuce : installe « sv-ttk » pour un thème "
+                              "moderne + mode sombre (le .bat le fait tout seul).")
         except SystemExit:
-            # charger_regles fait sys.exit en cas d'erreur : on l'intercepte
-            # pour afficher une vraie boîte de dialogue au lieu de fermer.
             self.regles = None
             messagebox.showerror(
                 "Fichier de règles manquant",
@@ -200,7 +294,7 @@ class Application(tk.Tk):
                 "Vérifie que le fichier regles.yaml est bien à côté du logiciel.")
 
     # -------------------------------------------------------------------------
-    # Bouton « Changer… » : choisir un autre dossier de travail
+    # Bouton « Changer… »
     # -------------------------------------------------------------------------
     def _choisir_dossier(self):
         """Ouvre une boîte pour choisir le dossier « Administration »."""
@@ -215,7 +309,7 @@ class Application(tk.Tk):
             self._message(f"Dossier de travail : {self.base}")
 
     # -------------------------------------------------------------------------
-    # Bouton « Ouvrir le dossier » : ouvrir l'explorateur de fichiers
+    # Bouton « Ouvrir »
     # -------------------------------------------------------------------------
     def _ouvrir_dossier(self):
         """Ouvre le dossier de travail dans l'explorateur du système."""
@@ -231,24 +325,19 @@ class Application(tk.Tk):
         import sys as _sys
         try:
             if _sys.platform.startswith("win"):
-                os.startfile(str(self.base))          # Windows
+                os.startfile(str(self.base))
             elif _sys.platform == "darwin":
-                subprocess.Popen(["open", str(self.base)])   # macOS
+                subprocess.Popen(["open", str(self.base)])
             else:
-                subprocess.Popen(["xdg-open", str(self.base)])  # Linux
+                subprocess.Popen(["xdg-open", str(self.base)])
         except Exception as erreur:
             messagebox.showerror("Erreur", f"Impossible d'ouvrir le dossier :\n{erreur}")
 
     # -------------------------------------------------------------------------
-    # Bouton « Analyser » : calcule l'aperçu (dans un fil séparé)
+    # Bouton « Analyser » (dans un fil séparé)
     # -------------------------------------------------------------------------
     def _lancer_analyse(self):
-        """Démarre l'analyse des PDF sans bloquer la fenêtre.
-
-        Lire des PDF peut prendre quelques secondes. Pour que la fenêtre ne
-        se fige pas, on fait ce travail dans un « thread » (fil d'exécution
-        séparé), puis on revient mettre à jour l'affichage.
-        """
+        """Démarre l'analyse des PDF sans bloquer la fenêtre."""
         if self.regles is None:
             messagebox.showerror(
                 "Règles manquantes",
@@ -256,31 +345,17 @@ class Application(tk.Tk):
                 "Vérifie le fichier regles.yaml.")
             return
 
-        # On désactive les boutons pendant l'analyse pour éviter les
-        # doubles-clics et les actions concurrentes.
         self._verrouiller_boutons(True)
         self._vider_tableau()
         self._etat("Analyse en cours…")
         self._message("Analyse des PDF de _a_trier…")
 
-        # Le travail lourd part dans un thread. Le thread NE touche JAMAIS à
-        # l'interface : il dépose seulement son résultat dans la file d'attente.
-        # C'est la fenêtre (fil principal) qui viendra le récupérer.
         fil = threading.Thread(target=self._analyse_en_arriere_plan, daemon=True)
         fil.start()
-
-        # On vérifie régulièrement (toutes les 100 ms) si le résultat est prêt.
         self.after(100, self._verifier_file_analyse)
 
     def _analyse_en_arriere_plan(self):
-        """Fait l'analyse (dans le thread). Ne touche PAS à l'écran.
-
-        Le résultat est déposé dans self.file_resultats sous la forme d'un
-        couple (type, donnée) :
-          ("ok", operations)        analyse réussie
-          ("dossier_absent", None)  le dossier _a_trier n'existe pas
-          ("erreur", message)       autre erreur inattendue
-        """
+        """Fait l'analyse (dans le thread). Ne touche PAS à l'écran."""
         try:
             operations = noyau.analyser_dossier(self.base, self.regles)
             self.file_resultats.put(("ok", operations))
@@ -290,16 +365,10 @@ class Application(tk.Tk):
             self.file_resultats.put(("erreur", str(erreur)))
 
     def _verifier_file_analyse(self):
-        """Regarde si le thread a fini ; si oui, met à jour l'affichage.
-
-        Cette fonction s'exécute dans le fil principal (c'est elle qui a le
-        droit de toucher à l'interface). Tant qu'il n'y a rien dans la file,
-        elle se replanifie toute seule.
-        """
+        """Regarde si le thread a fini ; si oui, met à jour l'affichage."""
         try:
             type_resultat, donnee = self.file_resultats.get_nowait()
         except queue.Empty:
-            # Pas encore prêt : on repasse dans 100 ms.
             self.after(100, self._verifier_file_analyse)
             return
 
@@ -316,7 +385,7 @@ class Application(tk.Tk):
         self._verrouiller_boutons(False)
 
         if not operations:
-            self._etat("Aucun PDF à traiter.")
+            self._etat("Aucun PDF à traiter.", COULEUR_DISCRET)
             self._message(f"Aucun PDF trouvé dans {self.base / noyau.DOSSIER_A_TRIER}.")
             self.bouton_classer.configure(state="disabled")
             return
@@ -324,43 +393,46 @@ class Application(tk.Tk):
         nb_classes = 0
         nb_non_classes = 0
 
-        for op in operations:
+        for index, op in enumerate(operations):
+            # Zébrage : une ligne sur deux reçoit une teinte discrète.
+            tags = ["impair"] if index % 2 else []
+
             if op["classe"]:
                 nb_classes += 1
+                statut = "✅"
                 emetteur = op["emetteur"]
                 categorie = op["categorie"]
                 date = op["date"]
-                nouveau_nom = op["nouveau_nom"]
-                # Petit rappel si la date vient de la date de modification.
                 if op["date_source"] == "modification":
-                    date = f"{date} (fichier)"
-                etiquettes = ()
+                    date = f"{date} *"   # l'étoile = date issue du fichier
+                nouveau_nom = op["nouveau_nom"]
             else:
                 nb_non_classes += 1
+                tags.append("nonclasse")
+                statut = "⚠"
                 emetteur = "—"
                 categorie = "_non_classe (à vérifier)"
                 date = "—"
                 nouveau_nom = "(nom inchangé)"
-                etiquettes = ("non_classe",)
 
             self.tableau.insert(
                 "", "end",
-                values=(op["source_name"], emetteur, categorie, date,
-                        op["confiance"], nouveau_nom),
-                tags=etiquettes)
+                values=(statut, op["source_name"], emetteur, categorie,
+                        date, nouveau_nom),
+                tags=tuple(tags))
 
-        self._etat(f"Aperçu prêt : {nb_classes} à classer, "
-                   f"{nb_non_classes} non classé(s). Rien n'a été déplacé.")
+        self._etat(
+            f"Aperçu prêt : {nb_classes} à classer, {nb_non_classes} à vérifier. "
+            f"Rien n'a été déplacé.",
+            COULEUR_OK if nb_non_classes == 0 else COULEUR_ATTENTION)
         self._message(f"Analyse terminée : {nb_classes} reconnu(s), "
                       f"{nb_non_classes} non classé(s).")
-
-        # On n'active « Classer » que s'il y a au moins un fichier à traiter.
         self.bouton_classer.configure(state="normal")
 
     def _analyse_echouee_dossier(self):
         """Cas : le dossier _a_trier n'existe pas."""
         self._verrouiller_boutons(False)
-        self._etat("Dossier _a_trier introuvable.")
+        self._etat("Dossier _a_trier introuvable.", COULEUR_ATTENTION)
         chemin = self.base / noyau.DOSSIER_A_TRIER
         self._message(f"Le dossier {chemin} n'existe pas.")
         messagebox.showwarning(
@@ -372,12 +444,12 @@ class Application(tk.Tk):
     def _analyse_echouee_autre(self, message):
         """Cas : une autre erreur inattendue pendant l'analyse."""
         self._verrouiller_boutons(False)
-        self._etat("Erreur pendant l'analyse.")
+        self._etat("Erreur pendant l'analyse.", COULEUR_ATTENTION)
         self._message(f"Erreur : {message}")
         messagebox.showerror("Erreur pendant l'analyse", message)
 
     # -------------------------------------------------------------------------
-    # Bouton « Classer » : déplace réellement les fichiers (après confirmation)
+    # Bouton « Classer »
     # -------------------------------------------------------------------------
     def _classer(self):
         """Applique réellement les opérations affichées, après confirmation."""
@@ -385,7 +457,6 @@ class Application(tk.Tk):
             return
 
         nb = len(self.operations)
-        # Demande de confirmation : c'est la seule étape qui modifie le disque.
         confirmer = messagebox.askyesno(
             "Confirmer le classement",
             f"{nb} fichier(s) vont être déplacés et renommés selon l'aperçu.\n\n"
@@ -409,19 +480,18 @@ class Application(tk.Tk):
                 f"Une erreur est survenue :\n{erreur}\n\n"
                 f"{nb_ok} fichier(s) ont déjà été déplacés (voir le journal).")
 
-        self._etat(f"Classement terminé : {nb_ok} fichier(s) déplacé(s).")
+        self._etat(f"Classement terminé : {nb_ok} fichier(s) déplacé(s).", COULEUR_OK)
         messagebox.showinfo(
             "Classement terminé",
             f"{nb_ok} fichier(s) ont été classés.\n\n"
             "Tu peux tout remettre en place avec « Annuler le dernier classement ».")
 
-        # L'aperçu n'est plus valable (les fichiers ont bougé) : on nettoie.
         self._vider_tableau()
         self.operations = []
         self.bouton_classer.configure(state="disabled")
 
     # -------------------------------------------------------------------------
-    # Bouton « Annuler » : remet les fichiers à leur place via le journal
+    # Bouton « Annuler »
     # -------------------------------------------------------------------------
     def _annuler(self):
         """Relit le journal et remet chaque fichier à son emplacement d'origine."""
@@ -444,7 +514,6 @@ class Application(tk.Tk):
         nb_remis = 0
         lignes_restantes = []
 
-        # On annule dans l'ordre inverse (les plus récentes d'abord).
         for ligne in reversed(lignes):
             chemin_actuel = Path(ligne["nouveau_chemin"])
             chemin_origine_voulu = Path(ligne["chemin_original"])
@@ -460,7 +529,6 @@ class Application(tk.Tk):
             nb_remis += 1
             self._message(f"Remis : {chemin_actuel.name}  →  {destination}")
 
-        # On met à jour (ou on supprime) le journal selon ce qui a été remis.
         if lignes_restantes:
             import csv
             with open(chemin_journal, "w", newline="", encoding="utf-8") as f:
@@ -471,7 +539,7 @@ class Application(tk.Tk):
         else:
             chemin_journal.unlink(missing_ok=True)
 
-        self._etat(f"Annulation terminée : {nb_remis} fichier(s) remis.")
+        self._etat(f"Annulation terminée : {nb_remis} fichier(s) remis.", COULEUR_OK)
         messagebox.showinfo(
             "Annulation terminée",
             f"{nb_remis} fichier(s) ont été remis à leur place.")
@@ -492,7 +560,6 @@ class Application(tk.Tk):
         etat = "disabled" if verrouille else "normal"
         self.bouton_analyser.configure(state=etat)
         self.bouton_annuler.configure(state=etat)
-        # Le bouton « Classer » reste géré séparément (selon l'aperçu).
 
 
 def main():
