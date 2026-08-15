@@ -130,7 +130,9 @@ def _construire_prompt(regles):
         "- la catégorie de rangement,\n"
         "- le type de document (ex : facture, releve, avis-impot),\n"
         "- la date du document au format AAAA-MM-JJ si elle est visible,\n"
-        "- le montant principal en euros si présent.\n\n"
+        "- le montant principal en euros si présent,\n"
+        "- la DATE LIMITE de paiement (échéance) au format AAAA-MM-JJ si présente,\n"
+        "- s'il faut FAIRE quelque chose (relance, mise en demeure, à payer) : oui/non.\n\n"
         f"Catégories autorisées pour Privé : {', '.join(prive)}.\n"
         f"Catégories autorisées pour Professionnel : {', '.join(pro)}.\n"
         f"Exemples d'émetteurs déjà connus : {exemples}.\n\n"
@@ -142,6 +144,8 @@ def _construire_prompt(regles):
         '  "type": "type-de-document-en-minuscules-avec-tirets",\n'
         '  "date": "AAAA-MM-JJ" ou null,\n'
         '  "montant": nombre ou null,\n'
+        '  "date_echeance": "AAAA-MM-JJ" ou null,\n'
+        '  "action_requise": true ou false,\n'
         '  "confiance": nombre entre 0 et 1\n'
         '}\n'
         "Si tu n'es pas sûr, mets une confiance basse. N'invente pas de catégorie."
@@ -230,6 +234,9 @@ def analyser_fichier_ia(chemin_pdf, regles, base, base_url=OLLAMA_URL_DEFAUT,
             "ocr": False,
             "moteur": "ia",
             "motif": motif,
+            "echeance": None,
+            "urgence": 0,
+            "urgence_label": "aucune",
         }
 
     try:
@@ -275,6 +282,13 @@ def analyser_fichier_ia(chemin_pdf, regles, base, base_url=OLLAMA_URL_DEFAUT,
     categorie, dossier_cible, nouveau_nom = noyau.composer_destination(
         base, emetteur_dict, date)
 
+    # Urgence : échéance + action, telles que lues par l'IA.
+    echeance = resultat.get("date_echeance")
+    if not _date_valide(echeance):
+        echeance = None
+    action = bool(resultat.get("action_requise"))
+    urgence, urgence_label = noyau.niveau_urgence(echeance, action)
+
     return {
         "source_path": chemin_pdf,
         "source_name": chemin_pdf.name,
@@ -289,6 +303,9 @@ def analyser_fichier_ia(chemin_pdf, regles, base, base_url=OLLAMA_URL_DEFAUT,
         "ocr": False,          # l'IA vision lit l'image directement
         "moteur": "ia",
         "montant": resultat.get("montant"),
+        "echeance": echeance,
+        "urgence": urgence,
+        "urgence_label": urgence_label,
     }
 
 

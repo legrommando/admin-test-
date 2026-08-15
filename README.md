@@ -60,7 +60,7 @@ pip install -r requirements.txt
 - **✏️ Corriger un classement** : **double-clique sur une ligne** du tableau
   pour choisir toi-même la catégorie et la date — pratique quand le logiciel
   se trompe, ou pour rattraper un document `_non_classe`.
-- **🔍 Documents scannés** : si l'OCR est installé (voir section 4), les PDF
+- **🔍 Documents scannés** : si l'OCR est installé (voir section 5), les PDF
   qui sont des images sont lus quand même ; ils sont repérés par une petite
   loupe 🔍 dans le tableau.
 - **🌙 Thème clair / sombre** : le bouton en haut à droite. Ton choix est
@@ -116,7 +116,26 @@ que le dernier classement : `python3 trier_documents.py --annuler --dernier`.
 
 ---
 
-## 4. Lire les documents scannés (OCR) — facultatif
+## 4. Documents urgents (triés automatiquement)
+
+Le logiciel repère les documents à **traiter en priorité** : ceux qui ont une
+**date limite de paiement** (échéance) proche ou dépassée, ou qui réclament une
+action (relance, mise en demeure, à payer…).
+
+- **Ordre automatique** : dans l'aperçu, les documents s'affichent **du plus
+  urgent au moins urgent**. Les urgents sont en **rouge**, avec une pastille :
+  🔴 en retard · 🟠 urgent (≤ 7 jours) · 🟡 échéance proche (≤ 30 jours).
+  L'échéance apparaît à côté de la date (⏰).
+- **Dossier `_priorites`** : au classement, une **copie** de chaque document
+  urgent est déposée dans `Administration/_priorites/`, **nommée par sa date
+  d'échéance**. Le dossier se trie donc tout seul du plus urgent au moins
+  urgent quand tu l'ouvres. L'original reste rangé normalement : c'est juste
+  un accès rapide à ta « pile à traiter » (tu supprimes les copies au fur et à
+  mesure que tu t'en occupes).
+
+C'est **automatique** à chaque analyse et classement — rien de plus à faire.
+
+## 5. Lire les documents scannés (OCR) — facultatif
 
 Beaucoup de courriers administratifs sont des **scans** : ce sont des images,
 sans texte. Sans OCR, ces PDF finissent dans `_non_classe`. Pour les lire :
@@ -136,7 +155,7 @@ seuls les scans ne sont pas reconnus.
 > 💡 Le moteur **IA locale** (section ci-dessous) lit lui aussi les scans, sans
 > Tesseract. Si tu utilises l'IA locale, tu n'as pas besoin de l'OCR.
 
-## 5. IA locale (privée) — facultatif
+## 6. IA locale (privée) — facultatif
 
 Au lieu de reconnaître les documents par mots-clés, le logiciel peut les faire
 **comprendre par une IA qui tourne sur TON ordinateur**. Rien n'est envoyé sur
@@ -168,7 +187,7 @@ est mémorisé d'une fois sur l'autre.
 > ⚙️ Modèle plus léger si ton PC est modeste : `ollama pull moondream` (~1,7 Go,
 > moins précis). Tu peux changer le modèle par défaut en haut de `moteur_ia.py`.
 
-## 6. Créer un vrai `.exe` (sans installer Python) — facultatif
+## 7. Créer un vrai `.exe` (sans installer Python) — facultatif
 
 Pour utiliser le logiciel sur une machine **sans Python**, tu peux fabriquer
 un exécutable autonome :
@@ -181,11 +200,11 @@ un exécutable autonome :
    dossier `Administration/` sera créé à côté de l'exe.
 
 > L'OCR (Tesseract) reste un logiciel **externe** : il n'est pas inclus dans
-> l'exe. Installe-le à part (section 4) si tu veux lire les scans.
+> l'exe. Installe-le à part (section 5) si tu veux lire les scans.
 
 ---
 
-## 7. Recherche et doublons
+## 8. Recherche et doublons
 
 Chaque document classé est enregistré dans une petite base de données locale
 (`Administration/memoire.db`, via SQLite — inclus dans Python, rien à installer).
@@ -206,7 +225,7 @@ renommé), le logiciel le reconnaît grâce à son empreinte et l'envoie dans
 
 Tout reste **local** : la base de données ne quitte pas ton ordinateur.
 
-## 8. Nom des fichiers rangés
+## 9. Nom des fichiers rangés
 
 Les documents reconnus sont renommés ainsi :
 
@@ -225,13 +244,14 @@ signale** (une étoile `*` apparaît à côté de la date dans le tableau).
 Un document non reconnu (confiance trop faible) part dans `_non_classe/`
 **sans être renommé**, pour que tu le traites à la main.
 
-## 9. Arborescence cible
+## 10. Arborescence cible
 
 ```
 Administration/
 ├── _a_trier/          ← tu déposes ici
 ├── _non_classe/       ← documents non reconnus
 ├── _doublons/         ← documents déjà classés (détectés en double)
+├── _priorites/        ← copies des documents urgents (triés par échéance)
 ├── journal.csv        ← historique des déplacements (pour l'annulation)
 ├── memoire.db         ← index des documents classés (recherche + doublons)
 ├── Prive/<année>/     ← Logement, Energie-Telecom, Banque-Assurance,
@@ -240,7 +260,7 @@ Administration/
                           Social-URSSAF, Impots-TVA, Divers
 ```
 
-## 10. Personnaliser le classement
+## 11. Personnaliser le classement
 
 Toutes les règles sont dans **`regles.yaml`**, que tu peux modifier
 librement (sans toucher au code). Pour chaque émetteur tu définis :
@@ -255,7 +275,7 @@ Free, MAIF, AXA, CPAM…) sont déjà fournis : copie un bloc et adapte-le pour
 ajouter les tiens. Tu peux aussi corriger un classement au cas par cas
 directement dans la fenêtre (double-clic sur une ligne).
 
-## 11. Fichiers de test et tests automatisés
+## 12. Fichiers de test et tests automatisés
 
 Pour essayer l'outil sans risque, génère 3 PDF factices :
 
@@ -273,7 +293,7 @@ reconnaissance, collisions, annulation par lot) :
 python3 -m unittest test_trier test_moteur_ia test_memoire
 ```
 
-## 12. Contenu du projet
+## 13. Contenu du projet
 
 | Fichier                    | Rôle                                             |
 |----------------------------|--------------------------------------------------|

@@ -169,5 +169,61 @@ class TestClasserEtAnnuler(unittest.TestCase):
             self.assertTrue(journal.exists())
 
 
+class TestUrgence(unittest.TestCase):
+    """Vérifie la détection d'échéance et le calcul d'urgence."""
+
+    def test_extraire_echeance(self):
+        self.assertEqual(
+            noyau.extraire_echeance("Facture. À payer avant le 20/08/2026. Merci"),
+            "2026-08-20")
+        self.assertEqual(
+            noyau.extraire_echeance("Date limite de paiement : 2026-09-01"),
+            "2026-09-01")
+        self.assertIsNone(noyau.extraire_echeance("Aucune échéance mentionnée ici."))
+
+    def test_niveaux(self):
+        import datetime
+        auj = datetime.date(2026, 8, 15)
+        self.assertEqual(noyau.niveau_urgence("2026-08-01", False, auj)[0], 4)  # retard
+        self.assertEqual(noyau.niveau_urgence("2026-08-20", False, auj)[0], 3)  # <=7j
+        self.assertEqual(noyau.niveau_urgence("2026-09-10", False, auj)[0], 2)  # <=30j
+        self.assertEqual(noyau.niveau_urgence("2026-12-01", False, auj)[0], 1)  # lointaine
+        self.assertEqual(noyau.niveau_urgence(None, True, auj)[0], 3)   # action sans date
+        self.assertEqual(noyau.niveau_urgence(None, False, auj)[0], 0)  # rien
+
+    def test_ordonner_par_urgence(self):
+        ops = [
+            {"source_name": "a", "urgence": 1, "echeance": "2026-12-01"},
+            {"source_name": "b", "urgence": 4, "echeance": "2026-08-01"},
+            {"source_name": "c", "urgence": 3, "echeance": "2026-08-20"},
+        ]
+        ordre = [o["source_name"] for o in noyau.ordonner_par_urgence(ops)]
+        self.assertEqual(ordre, ["b", "c", "a"])  # du plus urgent au moins urgent
+
+    def test_copie_dans_priorites(self):
+        with tempfile.TemporaryDirectory() as d:
+            base = Path(d)
+            a_trier = base / noyau.DOSSIER_A_TRIER
+            a_trier.mkdir(parents=True)
+            source = a_trier / "facture.pdf"
+            source.write_text("contenu")
+            em = REGLES_TEST["emetteurs"][0]
+            categorie, dossier_cible, nouveau_nom = noyau.composer_destination(
+                base, em, "2026-03-12")
+            op = {
+                "source_path": source, "source_name": "facture.pdf", "classe": True,
+                "emetteur": "EDF", "categorie": categorie, "confiance": 3,
+                "date": "2026-03-12", "date_source": "document",
+                "dossier_cible": dossier_cible, "nouveau_nom": nouveau_nom,
+                "ocr": False, "echeance": "2026-08-18", "urgence": 3,
+                "urgence_label": "urgent",
+            }
+            noyau.appliquer_operation(op, base / noyau.FICHIER_JOURNAL, lot="lot1")
+            # Une copie doit exister dans _priorites, préfixée par l'échéance.
+            copies = list((base / noyau.DOSSIER_PRIORITES).glob("*.pdf"))
+            self.assertEqual(len(copies), 1)
+            self.assertTrue(copies[0].name.startswith("2026-08-18__"))
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)
