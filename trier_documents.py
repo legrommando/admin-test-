@@ -52,6 +52,28 @@ except ImportError:
     print("Installe-le avec :  pip install -r requirements.txt")
     sys.exit(1)
 
+# --- OCR (facultatif) : lire le texte des PDF qui sont des IMAGES (scans) ---
+# Beaucoup de documents administratifs sont des scans : ce sont des images,
+# sans texte « sélectionnable ». pdfplumber n'y voit alors aucun texte.
+# L'OCR (reconnaissance optique de caractères) permet de « lire » ces images.
+#
+# On a besoin de deux choses :
+#   - pypdfium2 : pour transformer une page PDF en image (il est déjà installé
+#     avec pdfplumber, donc presque toujours présent) ;
+#   - pytesseract + le logiciel Tesseract : le moteur d'OCR proprement dit.
+#
+# Tout est OPTIONNEL : si l'OCR n'est pas disponible, le programme fonctionne
+# normalement, il se contente de ne pas lire les scans (qui iront alors dans
+# _non_classe). On ne bloque jamais pour ça.
+try:
+    import pypdfium2
+    import pytesseract
+    # On vérifie que le logiciel Tesseract est bien installé sur la machine.
+    pytesseract.get_tesseract_version()
+    OCR_DISPONIBLE = True
+except Exception:
+    OCR_DISPONIBLE = False
+
 
 # =============================================================================
 # Constantes : noms de dossiers et de fichiers
@@ -67,6 +89,7 @@ FICHIER_JOURNAL = "journal.csv"     # l'historique des déplacements
 
 # Colonnes du journal.csv (dans cet ordre exact).
 COLONNES_JOURNAL = [
+    "lot",              # identifiant du « lot » de classement (pour annuler un seul lot)
     "date_operation",   # quand l'opération a eu lieu
     "nom_original",     # nom du fichier avant déplacement
     "chemin_original",  # chemin complet avant déplacement
@@ -146,27 +169,76 @@ def charger_regles(chemin_regles):
 # Extraction du texte d'un PDF
 # =============================================================================
 
-def lire_texte_pdf(chemin_pdf):
-    """Extrait tout le texte d'un PDF grâce à pdfplumber.
+# En dessous de ce nombre de caractères, on considère que pdfplumber n'a
+# pratiquement rien lu (PDF probablement scanné) : on tentera alors l'OCR.
+SEUIL_TEXTE_OCR = 20
 
-    Retourne une grande chaîne de caractères (le texte de toutes les pages
-    collées ensemble). Si la lecture échoue, retourne une chaîne vide et
-    affiche un avertissement.
+# On n'OCRise que les premières pages (l'émetteur et la date sont presque
+# toujours en début de document), pour rester rapide.
+OCR_PAGES_MAX = 5
+
+
+def lire_texte_pdf(chemin_pdf, autoriser_ocr=True):
+    """Extrait le texte d'un PDF. Retourne un couple (texte, ocr_utilise).
+
+    On essaie d'abord pdfplumber (texte « sélectionnable », rapide et fiable).
+    Si le document est un SCAN (une image, donc quasiment aucun texte trouvé)
+    et que l'OCR est disponible, on tente alors de « lire » l'image.
+
+    - texte       : le texte extrait (chaîne, éventuellement vide)
+    - ocr_utilise : True si le texte provient de l'OCR, False sinon
     """
-    morceaux_de_texte = []
+    texte = ""
     try:
         with pdfplumber.open(chemin_pdf) as pdf:
-            for page in pdf.pages:
-                # extract_text() peut retourner None si la page est vide.
-                texte_page = page.extract_text() or ""
-                morceaux_de_texte.append(texte_page)
+            morceaux_de_texte = [(page.extract_text() or "") for page in pdf.pages]
+        texte = "\n".join(morceaux_de_texte)
     except Exception as erreur:
         # On ne veut pas que le programme s'arrête à cause d'un seul PDF
         # illisible : on prévient et on continue avec un texte vide.
         print(f"  ! Impossible de lire le PDF ({erreur}). Texte considéré vide.")
-        return ""
 
-    return "\n".join(morceaux_de_texte)
+    # Assez de texte « normal » ? Alors pas besoin d'OCR.
+    if len(texte.strip()) >= SEUIL_TEXTE_OCR:
+        return texte, False
+
+    # Sinon : document probablement scanné → on tente l'OCR (si disponible).
+    if autoriser_ocr and OCR_DISPONIBLE:
+        texte_ocr = _ocr_pdf(chemin_pdf)
+        if len(texte_ocr.strip()) > len(texte.strip()):
+            return texte_ocr, True
+
+    return texte, False
+
+
+def _ocr_pdf(chemin_pdf):
+    """« Lit » un PDF scanné en le passant par l'OCR (Tesseract). Retourne le texte.
+
+    On transforme chaque page en image (via pypdfium2), puis Tesseract
+    reconnaît le texte de l'image. En cas de souci, on retourne "" sans
+    faire planter le programme.
+    """
+    morceaux = []
+    try:
+        pdf = pypdfium2.PdfDocument(str(chemin_pdf))
+        nb_pages = min(len(pdf), OCR_PAGES_MAX)
+        for i in range(nb_pages):
+            page = pdf[i]
+            # On rend la page en image à ~200 points par pouce (bon compromis
+            # netteté / vitesse pour l'OCR). 72 = résolution PDF de base.
+            image = page.render(scale=200 / 72).to_pil()
+            try:
+                # On demande le français en priorité.
+                morceaux.append(pytesseract.image_to_string(image, lang="fra"))
+            except pytesseract.TesseractError:
+                # Si le pack de langue français n'est pas installé, on se
+                # rabat sur la langue par défaut de Tesseract.
+                morceaux.append(pytesseract.image_to_string(image))
+        pdf.close()
+    except Exception as erreur:
+        print(f"  ! OCR impossible ({erreur}).")
+        return ""
+    return "\n".join(morceaux)
 
 
 # =============================================================================
@@ -211,28 +283,50 @@ def identifier_emetteur(texte, regles):
 # =============================================================================
 
 # Table de correspondance des mois français -> numéro du mois.
+# On inclut les abréviations courantes (janv., fevr., avr., sept., dec.…).
+# Ces noms ne sont cherchés qu'ENTRE deux nombres (jour et année), donc aucun
+# risque qu'ils correspondent par erreur à un mot ordinaire du texte.
 MOIS_FR = {
-    "janvier": 1, "fevrier": 2, "mars": 3, "avril": 4,
-    "mai": 5, "juin": 6, "juillet": 7, "aout": 8,
-    "septembre": 9, "octobre": 10, "novembre": 11, "decembre": 12,
+    "janvier": 1, "janv": 1, "jan": 1,
+    "fevrier": 2, "fevr": 2, "fev": 2,
+    "mars": 3, "mar": 3,
+    "avril": 4, "avr": 4,
+    "mai": 5,
+    "juin": 6,
+    "juillet": 7, "juil": 7,
+    "aout": 8, "aou": 8,
+    "septembre": 9, "sept": 9, "sep": 9,
+    "octobre": 10, "oct": 10,
+    "novembre": 11, "nov": 11,
+    "decembre": 12, "dec": 12,
 }
+
+
+def _annee_sur_4_chiffres(annee_2):
+    """Transforme une année sur 2 chiffres en année sur 4 chiffres.
+
+    Règle habituelle : 00–79 -> 2000–2079, 80–99 -> 1980–1999.
+    (ex. « 26 » -> 2026, « 98 » -> 1998)
+    """
+    aa = int(annee_2)
+    return 2000 + aa if aa <= 79 else 1900 + aa
 
 
 def extraire_date(texte):
     """Cherche une date dans le texte et la retourne au format AAAA-MM-JJ.
 
-    On sait reconnaître trois formats courants en France :
-      1) 12/03/2026   (ou 12-03-2026)
-      2) 12 mars 2026
-      3) 2026-03-12   (format ISO)
+    Formats reconnus (courants en France) :
+      1) 2026-03-12                 (ISO, année en premier)
+      2) 12/03/2026 ou 12-03-2026   (jour/mois/année sur 4 chiffres)
+      3) 12/03/26                   (jour/mois/année sur 2 chiffres)
+      4) 12 mars 2026, 12 janv. 2026 (jour mois-en-lettres année)
 
-    Retourne une chaîne 'AAAA-MM-JJ' si une date valide est trouvée,
-    sinon retourne None.
+    On retourne la PREMIÈRE date valide trouvée (limite connue : sur un
+    document il peut y en avoir plusieurs). Retourne None si aucune.
     """
     texte_normalise = sans_accents(texte)
 
-    # --- Format 3 : 2026-03-12 (ISO, année en premier) ---
-    # On le teste en premier car il est le moins ambigu.
+    # --- Format 1 : 2026-03-12 (ISO) — le moins ambigu, testé en premier ---
     motif_iso = re.search(r"\b(\d{4})-(\d{2})-(\d{2})\b", texte_normalise)
     if motif_iso:
         annee, mois, jour = motif_iso.groups()
@@ -240,7 +334,7 @@ def extraire_date(texte):
         if date:
             return date
 
-    # --- Format 1 : 12/03/2026 ou 12-03-2026 (jour/mois/année) ---
+    # --- Format 2 : 12/03/2026 ou 12-03-2026 (année sur 4 chiffres) ---
     motif_numerique = re.search(
         r"\b(\d{1,2})[/-](\d{1,2})[/-](\d{4})\b", texte_normalise
     )
@@ -250,9 +344,20 @@ def extraire_date(texte):
         if date:
             return date
 
-    # --- Format 2 : 12 mars 2026 (jour mois-en-lettres année) ---
+    # --- Format 3 : 12/03/26 (année sur 2 chiffres) ---
+    motif_court = re.search(
+        r"\b(\d{1,2})[/-](\d{1,2})[/-](\d{2})\b", texte_normalise
+    )
+    if motif_court:
+        jour, mois, annee_2 = motif_court.groups()
+        date = _construire_date(_annee_sur_4_chiffres(annee_2), mois, jour)
+        if date:
+            return date
+
+    # --- Format 4 : 12 mars 2026 / 12 janv. 2026 (mois en lettres) ---
+    # Le point final éventuel de l'abréviation est autorisé (\.?).
     motif_lettres = re.search(
-        r"\b(\d{1,2})\s+([a-z]+)\s+(\d{4})\b", texte_normalise
+        r"\b(\d{1,2})\s+([a-z]+)\.?\s+(\d{4})\b", texte_normalise
     )
     if motif_lettres:
         jour, mois_texte, annee = motif_lettres.groups()
@@ -396,12 +501,13 @@ def analyser_fichier(chemin_pdf, regles, base):
       date_source   : "document", "modification" ou None
       dossier_cible : dossier de destination (Path)
       nouveau_nom   : nom de fichier prévu (str ; inchangé si non classé)
+      ocr           : True si le texte a été lu par OCR (document scanné)
     """
     base = Path(base)
     seuil = regles.get("reglages", {}).get("seuil_confiance_min", 2)
 
-    # 1) Lire le texte du PDF, puis identifier l'émetteur.
-    texte = lire_texte_pdf(chemin_pdf)
+    # 1) Lire le texte du PDF (avec OCR en secours), puis identifier l'émetteur.
+    texte, ocr_utilise = lire_texte_pdf(chemin_pdf)
     emetteur, score = identifier_emetteur(texte, regles)
 
     # 2) Confiance trop faible -> _non_classe, sans renommer.
@@ -417,6 +523,7 @@ def analyser_fichier(chemin_pdf, regles, base):
             "date_source": None,
             "dossier_cible": base / DOSSIER_NON_CLASSE,
             "nouveau_nom": chemin_pdf.name,   # on garde le nom d'origine
+            "ocr": ocr_utilise,
         }
 
     # 3) Confiance suffisante : on trouve la date (ou repli sur date de modif).
@@ -426,18 +533,8 @@ def analyser_fichier(chemin_pdf, regles, base):
         date = date_de_modification(chemin_pdf)
         date_source = "modification"
 
-    annee = date[:4]
-
-    # 4) Construire le nouveau nom : AAAA-MM-JJ_Emetteur_type.pdf
-    nom_emetteur = nettoyer_pour_nom_fichier(emetteur["emetteur"])
-    type_doc = nettoyer_pour_nom_fichier(emetteur.get("type", "document"))
-    nouveau_nom = f"{date}_{nom_emetteur}_{type_doc}.pdf"
-
-    # 5) Construire le dossier de destination : Domaine/annee/Destination
-    domaine = emetteur["domaine"]           # "Prive" ou "Pro"
-    sous_dossier = emetteur["destination"]  # ex : Energie-Telecom
-    categorie = f"{domaine}/{sous_dossier}"
-    dossier_cible = base / domaine / annee / sous_dossier
+    # 4) Construire la destination (dossier + nouveau nom) à partir de l'émetteur.
+    categorie, dossier_cible, nouveau_nom = composer_destination(base, emetteur, date)
 
     return {
         "source_path": chemin_pdf,
@@ -450,7 +547,27 @@ def analyser_fichier(chemin_pdf, regles, base):
         "date_source": date_source,
         "dossier_cible": dossier_cible,
         "nouveau_nom": nouveau_nom,
+        "ocr": ocr_utilise,
     }
+
+
+def composer_destination(base, emetteur_dict, date):
+    """Calcule (categorie, dossier_cible, nouveau_nom) pour un émetteur + une date.
+
+    Regroupe en un seul endroit la « recette » du rangement, pour qu'elle soit
+    identique partout : analyse automatique ET correction manuelle depuis la
+    fenêtre. Attend une date au format 'AAAA-MM-JJ'.
+    """
+    annee = date[:4]
+    nom_emetteur = nettoyer_pour_nom_fichier(emetteur_dict["emetteur"])
+    type_doc = nettoyer_pour_nom_fichier(emetteur_dict.get("type", "document"))
+    nouveau_nom = f"{date}_{nom_emetteur}_{type_doc}.pdf"
+
+    domaine = emetteur_dict["domaine"]           # "Prive" ou "Pro"
+    sous_dossier = emetteur_dict["destination"]  # ex : Energie-Telecom
+    categorie = f"{domaine}/{sous_dossier}"
+    dossier_cible = Path(base) / domaine / annee / sous_dossier
+    return categorie, dossier_cible, nouveau_nom
 
 
 def analyser_dossier(base, regles):
@@ -465,13 +582,22 @@ def analyser_dossier(base, regles):
     return [analyser_fichier(p, regles, base) for p in fichiers_pdf]
 
 
-def appliquer_operation(operation, chemin_journal):
+def nouveau_lot():
+    """Retourne un identifiant de lot (basé sur l'horodatage) pour un classement.
+
+    Tous les fichiers classés « en même temps » partagent le même lot, ce qui
+    permet d'annuler UNIQUEMENT ce lot-là plus tard.
+    """
+    return datetime.datetime.now().strftime("%Y%m%d-%H%M%S")
+
+
+def appliquer_operation(operation, chemin_journal, lot=""):
     """Exécute réellement UNE opération : déplace le fichier et journalise.
 
     - Crée le dossier de destination si besoin.
     - Évite toute collision de nom (suffixe _2, _3, ...) : on ne supprime
       et on n'écrase jamais rien.
-    - Ajoute une ligne au journal.csv.
+    - Ajoute une ligne au journal.csv (avec l'identifiant de lot).
 
     Retourne le chemin final (Path) où le fichier a été déplacé.
     """
@@ -485,6 +611,7 @@ def appliquer_operation(operation, chemin_journal):
     shutil.move(str(operation["source_path"]), str(destination))
 
     ajouter_au_journal(chemin_journal, {
+        "lot": lot,
         "date_operation": datetime.datetime.now().isoformat(timespec="seconds"),
         "nom_original": operation["source_name"],
         "chemin_original": str(operation["source_path"]),
@@ -494,6 +621,77 @@ def appliquer_operation(operation, chemin_journal):
         "confiance": operation["confiance"],
     })
     return destination
+
+
+def annuler_operations(base, dernier_lot_seulement=False, journaliser=print):
+    """Remet en place les fichiers listés dans le journal (fonction partagée).
+
+    Utilisée par la ligne de commande ET par la fenêtre, pour ne pas dupliquer
+    cette logique délicate.
+
+    - base                  : dossier Administration
+    - dernier_lot_seulement : si True, on n'annule QUE le dernier classement
+                              (le dernier « lot ») ; sinon on annule tout.
+    - journaliser           : fonction appelée pour chaque message (par défaut
+                              print ; la fenêtre y branche son propre journal).
+
+    Retourne un couple (nb_remis, nb_ignores).
+    On ne supprime jamais rien : si l'emplacement d'origine est déjà occupé,
+    on ajoute un suffixe pour ne rien écraser.
+    """
+    chemin_journal = Path(base) / FICHIER_JOURNAL
+    lignes = lire_journal(chemin_journal)
+    if not lignes:
+        return 0, 0
+
+    # Si demandé, on ne garde que les lignes du dernier lot présent dans le
+    # journal (les anciens journaux sans colonne « lot » -> lot vide "").
+    if dernier_lot_seulement:
+        dernier = lignes[-1].get("lot", "") or ""
+        a_annuler = [lg for lg in lignes if (lg.get("lot", "") or "") == dernier]
+        a_garder = [lg for lg in lignes if (lg.get("lot", "") or "") != dernier]
+    else:
+        a_annuler = list(lignes)
+        a_garder = []
+
+    nb_remis = 0
+    # Les lignes de a_annuler qu'on n'a pas pu remettre (fichier introuvable)
+    # sont conservées elles aussi, pour ne pas perdre l'information.
+    non_remises = []
+
+    # On annule dans l'ordre inverse (les opérations les plus récentes d'abord).
+    for ligne in reversed(a_annuler):
+        chemin_actuel = Path(ligne["nouveau_chemin"])
+        chemin_origine_voulu = Path(ligne["chemin_original"])
+
+        if not chemin_actuel.exists():
+            journaliser(f"Introuvable, ignoré : {chemin_actuel}")
+            non_remises.append(ligne)
+            continue
+
+        destination = chemin_sans_collision(chemin_origine_voulu)
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        shutil.move(str(chemin_actuel), str(destination))
+        nb_remis += 1
+        if destination == chemin_origine_voulu:
+            journaliser(f"Remis : {chemin_actuel.name}  ->  {destination}")
+        else:
+            journaliser(f"Remis (nom ajusté) : {chemin_actuel.name}  ->  {destination}")
+
+    # On réécrit le journal avec ce qui reste (lots non concernés + échecs).
+    lignes_restantes = a_garder + non_remises
+    if lignes_restantes:
+        with open(chemin_journal, "w", newline="", encoding="utf-8") as f:
+            ecrivain = csv.DictWriter(f, fieldnames=COLONNES_JOURNAL)
+            ecrivain.writeheader()
+            for ligne in lignes_restantes:
+                # On ne réécrit que les colonnes connues (compatibilité anciens
+                # journaux qui n'avaient pas la colonne « lot »).
+                ecrivain.writerow({c: ligne.get(c, "") for c in COLONNES_JOURNAL})
+    else:
+        chemin_journal.unlink(missing_ok=True)
+
+    return nb_remis, len(non_remises)
 
 
 # =============================================================================
@@ -534,9 +732,16 @@ def traiter_dossier(base, regles, mode_execute):
 
     nb_classes = 0
     nb_non_classes = 0
+    # Tous les fichiers de cette exécution partagent le même « lot »,
+    # ce qui permettra d'annuler uniquement ce classement-ci.
+    lot = nouveau_lot()
 
     for operation in operations:
         print(f"Fichier : {operation['source_name']}")
+
+        # On signale les documents lus par OCR (scans).
+        if operation.get("ocr"):
+            print("  (document scanné : texte lu par OCR)")
 
         if not operation["classe"]:
             # --- Confiance trop faible ---
@@ -557,7 +762,7 @@ def traiter_dossier(base, regles, mode_execute):
         apercu = operation["dossier_cible"] / operation["nouveau_nom"]
 
         if mode_execute:
-            destination = appliquer_operation(operation, chemin_journal)
+            destination = appliquer_operation(operation, chemin_journal, lot=lot)
             print(f"  -> Déplacé vers : {destination}")
         else:
             print(f"  -> SERAIT déplacé vers : {apercu}")
@@ -575,66 +780,31 @@ def traiter_dossier(base, regles, mode_execute):
 # Annulation : remettre les fichiers à leur place d'origine
 # =============================================================================
 
-def annuler(base):
-    """Relit le journal.csv et remet chaque fichier à son emplacement d'origine.
+def annuler(base, dernier_lot_seulement=False):
+    """Annule les déplacements (via le journal), en affichant les messages.
 
-    On procède dans l'ordre inverse (dernière opération annulée en premier),
-    ce qui est plus sûr. On ne supprime rien : si le chemin d'origine est
-    déjà occupé, on ajoute un suffixe pour ne rien écraser.
+    Simple habillage « terminal » autour de la fonction partagée
+    annuler_operations (qui contient toute la vraie logique).
     """
-    chemin_journal = base / FICHIER_JOURNAL
-    lignes = lire_journal(chemin_journal)
-
+    lignes = lire_journal(Path(base) / FICHIER_JOURNAL)
     if not lignes:
         print("Rien à annuler : le journal est vide ou introuvable.")
         return
 
-    print(f">>> Annulation de {len(lignes)} opération(s) à partir du journal.\n")
+    portee = "du dernier classement" if dernier_lot_seulement else "de tout le journal"
+    print(f">>> Annulation {portee}.\n")
 
-    nb_remis = 0
-    lignes_restantes = []  # opérations que l'on n'a PAS pu annuler (à garder)
+    nb_remis, nb_ignores = annuler_operations(
+        base,
+        dernier_lot_seulement=dernier_lot_seulement,
+        journaliser=lambda msg: print(f"  {msg}"),
+    )
 
-    # On parcourt à l'envers : on annule d'abord les opérations les plus récentes.
-    for ligne in reversed(lignes):
-        chemin_actuel = Path(ligne["nouveau_chemin"])
-        chemin_origine_voulu = Path(ligne["chemin_original"])
-
-        if not chemin_actuel.exists():
-            # Le fichier n'est plus là où le journal l'attend : on prévient
-            # et on conserve la ligne pour que tu puisses vérifier.
-            print(f"  ! Introuvable, ignoré : {chemin_actuel}")
-            lignes_restantes.append(ligne)
-            continue
-
-        # On ne veut jamais écraser : on cherche un nom libre à l'origine.
-        destination = chemin_sans_collision(chemin_origine_voulu)
-
-        # On recrée le dossier d'origine si besoin, puis on déplace.
-        destination.parent.mkdir(parents=True, exist_ok=True)
-        shutil.move(str(chemin_actuel), str(destination))
-        nb_remis += 1
-
-        if destination == chemin_origine_voulu:
-            print(f"  Remis : {chemin_actuel}  ->  {destination}")
-        else:
-            print(f"  Remis (nom ajusté) : {chemin_actuel}  ->  {destination}")
-
-    # Si tout a été remis, on peut vider le journal ; sinon on garde les
-    # lignes non traitées pour ne pas perdre d'information.
-    if lignes_restantes:
-        # On réécrit le journal avec seulement les lignes restantes.
-        with open(chemin_journal, "w", newline="", encoding="utf-8") as f:
-            ecrivain = csv.DictWriter(f, fieldnames=COLONNES_JOURNAL)
-            ecrivain.writeheader()
-            # On remet dans l'ordre chronologique d'origine.
-            for ligne in reversed(lignes_restantes):
-                ecrivain.writerow(ligne)
-        print(f"\n{nb_remis} fichier(s) remis. "
-              f"{len(lignes_restantes)} ligne(s) conservée(s) dans le journal.")
+    print(f"\n{nb_remis} fichier(s) remis.", end="")
+    if nb_ignores:
+        print(f" {nb_ignores} introuvable(s), conservé(s) dans le journal.")
     else:
-        # Tout a été annulé : on supprime le journal devenu inutile.
-        chemin_journal.unlink(missing_ok=True)
-        print(f"\n{nb_remis} fichier(s) remis. Journal vidé.")
+        print()
 
 
 # =============================================================================
@@ -667,13 +837,18 @@ def main():
         action="store_true",
         help="Annule les déplacements en relisant journal.csv.",
     )
+    analyseur.add_argument(
+        "--dernier",
+        action="store_true",
+        help="Avec --annuler : n'annule que le dernier classement (dernier lot).",
+    )
     options = analyseur.parse_args()
 
     base = Path(options.base)
 
     # Cas 1 : on veut annuler. Pas besoin des règles pour cela.
     if options.annuler:
-        annuler(base)
+        annuler(base, dernier_lot_seulement=options.dernier)
         return
 
     # Cas 2 : classement (simulation par défaut, réel avec --execute).

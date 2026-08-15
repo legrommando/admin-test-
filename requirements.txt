@@ -5,11 +5,21 @@ pdfplumber>=0.11   # lecture et extraction du texte des PDF
 PyYAML>=6.0        # lecture du fichier de règles regles.yaml
 sv-ttk>=2.6        # thème moderne (style Windows 11) + mode sombre pour la fenêtre
 
+# --- Confort (facultatif mais installé par défaut) -------------------------
+tkinterdnd2>=0.4   # glisser-déposer des PDF directement dans la fenêtre
+pytesseract>=0.3   # OCR : lire les documents SCANNÉS (images)
+
 # reportlab n'est utile QUE pour générer les PDF de test (generer_pdf_test.py).
 # Tu peux le retirer si tu n'en as pas besoin.
 reportlab>=4.0
 
-# NB : le logiciel (fenêtre) utilise tkinter, qui est INCLUS dans Python
-# (rien à installer sous Windows/macOS via python.org).
-# Sous Linux uniquement, si besoin : sudo apt install python3-tk
+# NB 1 : le logiciel (fenêtre) utilise tkinter, qui est INCLUS dans Python
+#        (rien à installer sous Windows/macOS via python.org).
+#        Sous Linux uniquement, si besoin : sudo apt install python3-tk
+#
+# NB 2 : l'OCR (lecture des scans) a besoin, EN PLUS de pytesseract ci-dessus,
+#        du logiciel « Tesseract » installé à part sur la machine. C'est
+#        FACULTATIF : sans lui, tout marche, seuls les scans ne sont pas lus.
+#        Windows : installateur « tesseract-ocr-w64 » (UB Mannheim) + langue
+#        française. Voir la section OCR du README.
 
