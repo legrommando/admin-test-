@@ -3,6 +3,7 @@
 
 pdfplumber>=0.11   # lecture et extraction du texte des PDF
 PyYAML>=6.0        # lecture du fichier de règles regles.yaml
+sv-ttk>=2.6        # thème moderne (style Windows 11) + mode sombre pour la fenêtre
 
 # reportlab n'est utile QUE pour générer les PDF de test (generer_pdf_test.py).
 # Tu peux le retirer si tu n'en as pas besoin.
