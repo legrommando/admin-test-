@@ -131,6 +131,7 @@ class Application(tk.Tk):
         self._construire_interface()
         self._activer_glisser_deposer()
         self._charger_regles_au_demarrage()
+        self._afficher_rappels()   # rappel des documents à traiter, au démarrage
 
         # Sauvegarde des préférences à la fermeture.
         self.protocol("WM_DELETE_WINDOW", self._a_la_fermeture)
@@ -256,7 +257,21 @@ class Application(tk.Tk):
             width=10, command=self._basculer_theme)
         self.bouton_theme.pack(side="right", anchor="n")
 
-        ttk.Separator(self, orient="horizontal").pack(fill="x", padx=20)
+        self._separateur_haut = ttk.Separator(self, orient="horizontal")
+        self._separateur_haut.pack(fill="x", padx=20)
+
+        # ---------- BANDEAU DE RAPPEL (documents à traiter) ----------
+        # Créé ici mais affiché seulement s'il y a des documents en attente.
+        self.cadre_rappel = ttk.Frame(self, padding=(20, 8, 20, 0))
+        self.var_rappel = tk.StringVar()
+        self.label_rappel = ttk.Label(
+            self.cadre_rappel, textvariable=self.var_rappel,
+            font=(self.police_sous_titre[0], 10, "bold"))
+        self.label_rappel.pack(side="left")
+        ttk.Button(self.cadre_rappel, text="📂  Ouvrir « à traiter »",
+                   command=self._ouvrir_priorites).pack(side="left", padx=(10, 0))
+        ttk.Button(self.cadre_rappel, text="✕", width=3,
+                   command=self.cadre_rappel.pack_forget).pack(side="right")
 
         # ---------- DOSSIER DE TRAVAIL ----------
         cadre_dossier = ttk.Frame(self, padding=(20, 12, 20, 4))
@@ -460,6 +475,7 @@ class Application(tk.Tk):
             self.bouton_classer.configure(state="disabled")
             self._sauver_config()
             self._message(f"Dossier de travail : {self.base}")
+            self._afficher_rappels()   # rappels du nouveau dossier
 
     def _ouvrir_dossier(self):
         if not self.base.exists():
@@ -478,6 +494,44 @@ class Application(tk.Tk):
                 subprocess.Popen(["open", str(self.base)])
             else:
                 subprocess.Popen(["xdg-open", str(self.base)])
+        except Exception as erreur:
+            messagebox.showerror("Erreur", f"Impossible d'ouvrir le dossier :\n{erreur}")
+
+    # =========================================================================
+    # Rappels au démarrage (documents à traiter)
+    # =========================================================================
+    def _afficher_rappels(self):
+        """Affiche (ou cache) le bandeau des documents restant à traiter."""
+        resume = noyau.resumer_priorites(self.base)
+        phrase = noyau.texte_rappel(resume)
+        if not phrase:
+            self.cadre_rappel.pack_forget()
+            return
+        # Rouge s'il y a des retards, sinon orange.
+        couleur = "#c0392b" if resume.get("en_retard") else COULEUR_ATTENTION
+        self.var_rappel.set("⏰  " + phrase)
+        self.label_rappel.configure(foreground=couleur)
+        # On place le bandeau juste sous l'en-tête (s'il n'est pas déjà affiché).
+        if not self.cadre_rappel.winfo_ismapped():
+            self.cadre_rappel.pack(fill="x", after=self._separateur_haut)
+
+    def _ouvrir_priorites(self):
+        """Ouvre le dossier _priorites (la pile « à traiter ») dans l'explorateur."""
+        dossier = self.base / noyau.DOSSIER_PRIORITES
+        if not dossier.exists():
+            messagebox.showinfo("Rien à traiter",
+                                "Aucun document en attente pour l'instant. 🎉")
+            return
+        import os
+        import subprocess
+        import sys as _sys
+        try:
+            if _sys.platform.startswith("win"):
+                os.startfile(str(dossier))
+            elif _sys.platform == "darwin":
+                subprocess.Popen(["open", str(dossier)])
+            else:
+                subprocess.Popen(["xdg-open", str(dossier)])
         except Exception as erreur:
             messagebox.showerror("Erreur", f"Impossible d'ouvrir le dossier :\n{erreur}")
 
@@ -802,6 +856,7 @@ class Application(tk.Tk):
         self._vider_tableau()
         self.operations = []
         self.bouton_classer.configure(state="disabled")
+        self._afficher_rappels()   # des documents urgents ont pu être ajoutés
 
     # =========================================================================
     # Annuler (le dernier lot), via la fonction partagée du noyau

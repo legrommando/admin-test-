@@ -225,5 +225,37 @@ class TestUrgence(unittest.TestCase):
             self.assertTrue(copies[0].name.startswith("2026-08-18__"))
 
 
+class TestRappels(unittest.TestCase):
+    """Vérifie le résumé des documents à traiter (dossier _priorites)."""
+
+    def test_resume_par_urgence(self):
+        import datetime
+        with tempfile.TemporaryDirectory() as d:
+            base = Path(d)
+            prio = base / noyau.DOSSIER_PRIORITES
+            prio.mkdir(parents=True)
+            (prio / "2026-08-01__a.pdf").write_text("x")   # passé -> en retard
+            (prio / "2026-08-18__b.pdf").write_text("x")   # dans 3 j -> urgent
+            (prio / "2026-12-01__c.pdf").write_text("x")   # loin -> à venir
+            (prio / "0000-00-00__d.pdf").write_text("x")   # action sans date -> urgent
+            resume = noyau.resumer_priorites(base, datetime.date(2026, 8, 15))
+            self.assertEqual(resume["total"], 4)
+            self.assertEqual(resume["en_retard"], 1)
+            self.assertEqual(resume["urgent"], 2)
+            self.assertEqual(resume["a_venir"], 1)
+
+    def test_texte_rappel(self):
+        self.assertIsNone(noyau.texte_rappel({"total": 0}))
+        phrase = noyau.texte_rappel(
+            {"total": 3, "en_retard": 1, "urgent": 2, "a_venir": 0})
+        self.assertIn("3 document(s) à traiter", phrase)
+        self.assertIn("1 en retard", phrase)
+
+    def test_resume_dossier_absent(self):
+        with tempfile.TemporaryDirectory() as d:
+            resume = noyau.resumer_priorites(Path(d))
+            self.assertEqual(resume["total"], 0)
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)
