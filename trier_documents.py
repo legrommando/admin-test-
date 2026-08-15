@@ -508,6 +508,64 @@ def ordonner_par_urgence(operations):
     )
 
 
+def resumer_priorites(base, aujourdhui=None):
+    """Compte les documents « à traiter » présents dans le dossier _priorites.
+
+    On lit l'échéance dans le nom de chaque fichier (préfixe « AAAA-MM-JJ__ »)
+    et on répartit par urgence. Sert à afficher un rappel au démarrage.
+
+    Retourne un dictionnaire :
+      { "total": N, "en_retard": N, "urgent": N, "a_venir": N }
+    (« urgent » = échéance dans 7 jours ou moins, ou action sans date.)
+    """
+    if aujourdhui is None:
+        aujourdhui = datetime.date.today()
+
+    resume = {"total": 0, "en_retard": 0, "urgent": 0, "a_venir": 0}
+    dossier = Path(base) / DOSSIER_PRIORITES
+    if not dossier.exists():
+        return resume
+
+    for fichier in dossier.iterdir():
+        if not fichier.is_file() or fichier.suffix.lower() != ".pdf":
+            continue
+        resume["total"] += 1
+        prefixe = fichier.name.split("__", 1)[0]
+        try:
+            echeance = datetime.date.fromisoformat(prefixe)
+        except ValueError:
+            # Pas de date lisible (ex. 0000-00-00) : action à faire -> urgent.
+            resume["urgent"] += 1
+            continue
+        jours = (echeance - aujourdhui).days
+        if jours < 0:
+            resume["en_retard"] += 1
+        elif jours <= 7:
+            resume["urgent"] += 1
+        else:
+            resume["a_venir"] += 1
+    return resume
+
+
+def texte_rappel(resume):
+    """Transforme un résumé de _priorites en petite phrase lisible (ou None).
+
+    Ex. : « 3 document(s) à traiter, dont 1 en retard et 2 urgents. »
+    Retourne None s'il n'y a rien à traiter.
+    """
+    if not resume or resume.get("total", 0) == 0:
+        return None
+    morceaux = []
+    if resume.get("en_retard"):
+        morceaux.append(f"{resume['en_retard']} en retard")
+    if resume.get("urgent"):
+        morceaux.append(f"{resume['urgent']} urgent(s)")
+    if resume.get("a_venir"):
+        morceaux.append(f"{resume['a_venir']} à venir")
+    detail = (" — dont " + ", ".join(morceaux)) if morceaux else ""
+    return f"{resume['total']} document(s) à traiter{detail}."
+
+
 # =============================================================================
 # Construction du chemin de destination et gestion des collisions
 # =============================================================================
@@ -1086,11 +1144,22 @@ def main():
         metavar="TEXTE",
         help="Recherche dans les documents déjà classés (ex : --chercher \"EDF 2025\").",
     )
+    analyseur.add_argument(
+        "--rappels",
+        action="store_true",
+        help="Affiche les documents restant à traiter (dossier _priorites).",
+    )
     options = analyseur.parse_args()
 
     base = Path(options.base)
 
-    # Cas 0 : recherche dans la mémoire.
+    # Cas 0a : rappels (documents à traiter).
+    if options.rappels:
+        phrase = texte_rappel(resumer_priorites(base))
+        print("⏰ " + phrase if phrase else "Rien à traiter pour le moment. 🎉")
+        return
+
+    # Cas 0b : recherche dans la mémoire.
     if options.chercher:
         chercher_documents(base, options.chercher)
         return

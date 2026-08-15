@@ -133,6 +133,14 @@ action (relance, mise en demeure, à payer…).
   un accès rapide à ta « pile à traiter » (tu supprimes les copies au fur et à
   mesure que tu t'en occupes).
 
+### Rappels au démarrage
+
+À l'ouverture du logiciel (et après chaque classement), un **bandeau rouge**
+te prévient s'il te reste des documents à traiter — par ex. *« ⏰ 3 documents
+à traiter — dont 1 en retard »* — avec un bouton **« Ouvrir « à traiter » »**
+qui t'amène directement au dossier `_priorites`. En ligne de commande :
+`python trier_documents.py --rappels`.
+
 C'est **automatique** à chaque analyse et classement — rien de plus à faire.
 
 ## 5. Lire les documents scannés (OCR) — facultatif
