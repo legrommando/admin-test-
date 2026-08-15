@@ -84,8 +84,10 @@ except Exception:
 DOSSIER_RACINE = "Administration"   # dossier principal qui contient tout
 DOSSIER_A_TRIER = "_a_trier"        # là où tu déposes les PDF en vrac
 DOSSIER_NON_CLASSE = "_non_classe"  # là où vont les documents non reconnus
+DOSSIER_DOUBLONS = "_doublons"      # là où vont les documents en double (déjà classés)
 FICHIER_REGLES = "regles.yaml"      # les règles de classement (éditable)
 FICHIER_JOURNAL = "journal.csv"     # l'historique des déplacements
+FICHIER_MEMOIRE = "memoire.db"      # base de données (index de tous les documents classés)
 
 # Colonnes du journal.csv (dans cet ordre exact).
 COLONNES_JOURNAL = [
@@ -620,6 +622,17 @@ def appliquer_operation(operation, chemin_journal, lot=""):
         "categorie": operation["categorie"],
         "confiance": operation["confiance"],
     })
+
+    # On enregistre le document dans la mémoire (base de données), sauf s'il
+    # s'agit d'un doublon. Import tardif + garde : la mémoire ne doit jamais
+    # bloquer le classement.
+    if not operation.get("doublon"):
+        try:
+            import memoire
+            memoire.enregistrer(Path(chemin_journal).parent, operation, destination)
+        except Exception:
+            pass
+
     return destination
 
 
@@ -673,6 +686,14 @@ def annuler_operations(base, dernier_lot_seulement=False, journaliser=print):
         destination.parent.mkdir(parents=True, exist_ok=True)
         shutil.move(str(chemin_actuel), str(destination))
         nb_remis += 1
+
+        # On retire aussi la fiche de la mémoire (le document n'est plus classé).
+        try:
+            import memoire
+            memoire.retirer_par_chemin(base, chemin_actuel)
+        except Exception:
+            pass
+
         if destination == chemin_origine_voulu:
             journaliser(f"Remis : {chemin_actuel.name}  ->  {destination}")
         else:
@@ -738,6 +759,13 @@ def traiter_dossier(base, regles, mode_execute, moteur="regles"):
         print(f"Aucun PDF à traiter dans '{base / DOSSIER_A_TRIER}'.")
         return
 
+    # On repère les doublons (documents déjà classés) via la mémoire.
+    try:
+        import memoire
+        memoire.annoter_doublons(base, operations)
+    except Exception:
+        pass
+
     # Rappel visible du mode en cours.
     if mode_execute:
         print(">>> MODE EXECUTION : les fichiers vont être RÉELLEMENT déplacés.\n")
@@ -746,6 +774,7 @@ def traiter_dossier(base, regles, mode_execute, moteur="regles"):
 
     nb_classes = 0
     nb_non_classes = 0
+    nb_doublons = 0
     # Tous les fichiers de cette exécution partagent le même « lot »,
     # ce qui permettra d'annuler uniquement ce classement-ci.
     lot = nouveau_lot()
@@ -757,7 +786,11 @@ def traiter_dossier(base, regles, mode_execute, moteur="regles"):
         if operation.get("ocr"):
             print("  (document scanné : texte lu par OCR)")
 
-        if not operation["classe"]:
+        if operation.get("doublon"):
+            # --- Document déjà classé auparavant ---
+            nb_doublons += 1
+            print(f"  -> Doublon (déjà classé). Direction {DOSSIER_DOUBLONS}.")
+        elif not operation["classe"]:
             # --- Confiance trop faible ---
             nb_non_classes += 1
             print(f"  -> Confiance faible (score {operation['confiance']}). "
@@ -786,6 +819,8 @@ def traiter_dossier(base, regles, mode_execute, moteur="regles"):
     print("----- Résumé -----")
     print(f"  Classés        : {nb_classes}")
     print(f"  Non classés    : {nb_non_classes}")
+    if nb_doublons:
+        print(f"  Doublons       : {nb_doublons}")
     if not mode_execute:
         print("  (Simulation : aucun fichier n'a été modifié.)")
 
@@ -819,6 +854,32 @@ def annuler(base, dernier_lot_seulement=False):
         print(f" {nb_ignores} introuvable(s), conservé(s) dans le journal.")
     else:
         print()
+
+
+# =============================================================================
+# Recherche dans la mémoire (documents déjà classés)
+# =============================================================================
+
+def chercher_documents(base, requete):
+    """Affiche les documents déjà classés qui correspondent à la recherche."""
+    try:
+        import memoire
+    except Exception:
+        print("La recherche nécessite le fichier memoire.py.")
+        return
+
+    resultats = memoire.chercher(base, requete)
+    if not resultats:
+        print(f"Aucun document trouvé pour « {requete} ».")
+        print("(As-tu déjà classé des documents avec --execute ?)")
+        return
+
+    print(f">>> {len(resultats)} document(s) trouvé(s) pour « {requete} » :\n")
+    for fiche in resultats:
+        montant = f" — {fiche['montant']} €" if fiche.get("montant") else ""
+        print(f"  {fiche['date_doc'] or '????-??-??'}  "
+              f"{fiche['emetteur'] or '?':12}  {fiche['categorie'] or ''}{montant}")
+        print(f"      {fiche['chemin']}")
 
 
 # =============================================================================
@@ -862,9 +923,19 @@ def main():
         default="regles",
         help="Moteur d'analyse : 'regles' (mots-clés, défaut) ou 'ia' (IA locale Ollama).",
     )
+    analyseur.add_argument(
+        "--chercher",
+        metavar="TEXTE",
+        help="Recherche dans les documents déjà classés (ex : --chercher \"EDF 2025\").",
+    )
     options = analyseur.parse_args()
 
     base = Path(options.base)
+
+    # Cas 0 : recherche dans la mémoire.
+    if options.chercher:
+        chercher_documents(base, options.chercher)
+        return
 
     # Cas 1 : on veut annuler. Pas besoin des règles pour cela.
     if options.annuler:

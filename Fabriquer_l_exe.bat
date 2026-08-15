@@ -40,6 +40,7 @@ echo Fabrication de l'exe (cela peut prendre 1 a 2 minutes)...
     --collect-all sv_ttk ^
     --collect-all tkinterdnd2 ^
     --hidden-import moteur_ia ^
+    --hidden-import memoire ^
     trier_documents_gui.py
 
 if errorlevel 1 (
