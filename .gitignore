@@ -5,6 +5,9 @@ Administration/
 # Journal d'opérations (peut contenir des noms de fichiers personnels).
 journal.csv
 
+# Base de données (index des documents classés) — données personnelles.
+memoire.db
+
 # Fichiers Python temporaires
 __pycache__/
 *.pyc

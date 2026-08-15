@@ -185,7 +185,28 @@ un exécutable autonome :
 
 ---
 
-## 7. Nom des fichiers rangés
+## 7. Recherche et doublons
+
+Chaque document classé est enregistré dans une petite base de données locale
+(`Administration/memoire.db`, via SQLite — inclus dans Python, rien à installer).
+Cela apporte deux choses très pratiques.
+
+### Retrouver un document
+
+- **Fenêtre** : bouton **« 🔎 Rechercher… »** → tape un ou plusieurs mots
+  (« EDF 2025 », « CPAM »…). Double-clic sur un résultat pour **ouvrir** le PDF.
+- **Ligne de commande** : `python trier_documents.py --chercher "EDF 2025"`
+
+### Détection des doublons
+
+Si tu redéposes un document **déjà classé** (même contenu, même s'il a été
+renommé), le logiciel le reconnaît grâce à son empreinte et l'envoie dans
+**`_doublons/`** au lieu de le ranger une seconde fois. Rien n'est jamais
+écrasé. Dans la fenêtre, ces documents apparaissent avec le symbole ⧉.
+
+Tout reste **local** : la base de données ne quitte pas ton ordinateur.
+
+## 8. Nom des fichiers rangés
 
 Les documents reconnus sont renommés ainsi :
 
@@ -204,19 +225,22 @@ signale** (une étoile `*` apparaît à côté de la date dans le tableau).
 Un document non reconnu (confiance trop faible) part dans `_non_classe/`
 **sans être renommé**, pour que tu le traites à la main.
 
-## 8. Arborescence cible
+## 9. Arborescence cible
 
 ```
 Administration/
 ├── _a_trier/          ← tu déposes ici
 ├── _non_classe/       ← documents non reconnus
+├── _doublons/         ← documents déjà classés (détectés en double)
+├── journal.csv        ← historique des déplacements (pour l'annulation)
+├── memoire.db         ← index des documents classés (recherche + doublons)
 ├── Prive/<année>/     ← Logement, Energie-Telecom, Banque-Assurance,
 │                         Sante, Impots, Vehicule, Divers
 └── Pro/<année>/       ← Factures-Clients, Achats-Fournisseurs, Banque,
                           Social-URSSAF, Impots-TVA, Divers
 ```
 
-## 9. Personnaliser le classement
+## 10. Personnaliser le classement
 
 Toutes les règles sont dans **`regles.yaml`**, que tu peux modifier
 librement (sans toucher au code). Pour chaque émetteur tu définis :
@@ -231,7 +255,7 @@ Free, MAIF, AXA, CPAM…) sont déjà fournis : copie un bloc et adapte-le pour
 ajouter les tiens. Tu peux aussi corriger un classement au cas par cas
 directement dans la fenêtre (double-clic sur une ligne).
 
-## 10. Fichiers de test et tests automatisés
+## 11. Fichiers de test et tests automatisés
 
 Pour essayer l'outil sans risque, génère 3 PDF factices :
 
@@ -246,10 +270,10 @@ Pour vérifier que le moteur fonctionne toujours correctement (dates,
 reconnaissance, collisions, annulation par lot) :
 
 ```bash
-python3 -m unittest test_trier
+python3 -m unittest test_trier test_moteur_ia test_memoire
 ```
 
-## 11. Contenu du projet
+## 12. Contenu du projet
 
 | Fichier                    | Rôle                                             |
 |----------------------------|--------------------------------------------------|
@@ -258,10 +282,12 @@ python3 -m unittest test_trier
 | `Fabriquer_l_exe.bat`      | fabrique un `.exe` autonome (facultatif)         |
 | `trier_documents.py`       | le moteur de tri (mots-clés) + la version ligne de commande |
 | `moteur_ia.py`             | moteur **IA locale** (Ollama), facultatif        |
+| `memoire.py`               | mémoire des documents : **recherche** + **doublons** |
 | `regles.yaml`              | les règles de classement (éditable)              |
 | `generer_pdf_test.py`      | génère 3 PDF de test                             |
 | `test_trier.py`            | tests automatisés du moteur                      |
 | `test_moteur_ia.py`        | tests du moteur IA (faux serveur Ollama)         |
+| `test_memoire.py`          | tests de la mémoire (recherche, doublons)        |
 | `requirements.txt`         | les dépendances Python                           |
 | `README.md`                | ce fichier                                       |
 

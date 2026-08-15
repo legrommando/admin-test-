@@ -83,6 +83,13 @@ try:
 except Exception:
     MOTEUR_IA_DISPO = False
 
+# --- Mémoire des documents (facultatif) : recherche + doublons ---
+try:
+    import memoire
+    MEMOIRE_DISPO = True
+except Exception:
+    MEMOIRE_DISPO = False
+
 
 # Couleurs d'accent (identiques en clair et en sombre, bien contrastées).
 COULEUR_OK = "#2e9e5b"         # vert : reconnu / succès
@@ -312,6 +319,10 @@ class Application(tk.Tk):
             command=self._annuler)
         self.bouton_annuler.pack(side="left", ipady=4)
 
+        # Recherche dans les documents déjà classés.
+        ttk.Button(cadre_actions, text="🔎  Rechercher…",
+                   command=self._ouvrir_recherche).pack(side="right", ipady=4)
+
         # Petite aide sous les boutons.
         ttk.Label(self,
                   text="Astuce : double-clique sur une ligne pour corriger sa catégorie.",
@@ -347,6 +358,7 @@ class Application(tk.Tk):
         self.tableau.column("nouveau_nom", width=300)
 
         self.tableau.tag_configure("nonclasse", foreground=COULEUR_ATTENTION)
+        self.tableau.tag_configure("doublon", foreground="#3b6fb0")
         self.tableau.tag_configure("impair", background=self._couleur_zebre())
 
         barre = ttk.Scrollbar(cadre_tableau, orient="vertical",
@@ -542,6 +554,14 @@ class Application(tk.Tk):
             for i, chemin in enumerate(fichiers, start=1):
                 operations.append(analyser(chemin))
                 self.file_resultats.put(("progres", (i, total, chemin.name)))
+
+            # Repérage des doublons (documents déjà classés) via la mémoire.
+            if MEMOIRE_DISPO:
+                try:
+                    memoire.annoter_doublons(self.base, operations)
+                except Exception:
+                    pass
+
             self.file_resultats.put(("ok", operations))
         except Exception as erreur:
             self.file_resultats.put(("erreur", str(erreur)))
@@ -599,17 +619,19 @@ class Application(tk.Tk):
 
         self._remplir_tableau()
 
-        nb_classes = sum(1 for op in operations if op["classe"])
-        nb_non = len(operations) - nb_classes
+        nb_doublons = sum(1 for op in operations if op.get("doublon"))
+        nb_classes = sum(1 for op in operations if op["classe"] and not op.get("doublon"))
+        nb_non = len(operations) - nb_classes - nb_doublons
         nb_ocr = sum(1 for op in operations if op.get("ocr"))
 
         message_ocr = f" (dont {nb_ocr} scan(s) lus par OCR)" if nb_ocr else ""
+        texte_doublons = f", {nb_doublons} doublon(s)" if nb_doublons else ""
         self._etat(
-            f"Aperçu prêt : {nb_classes} à classer, {nb_non} à vérifier. "
-            f"Rien n'a été déplacé.",
-            COULEUR_OK if nb_non == 0 else COULEUR_ATTENTION)
+            f"Aperçu prêt : {nb_classes} à classer, {nb_non} à vérifier"
+            f"{texte_doublons}. Rien n'a été déplacé.",
+            COULEUR_OK if (nb_non == 0 and nb_doublons == 0) else COULEUR_ATTENTION)
         self._message(f"Analyse terminée : {nb_classes} reconnu(s), "
-                      f"{nb_non} non classé(s){message_ocr}.")
+                      f"{nb_non} non classé(s){texte_doublons}{message_ocr}.")
         self.bouton_classer.configure(state="normal")
 
     def _analyse_echouee_dossier(self):
@@ -645,7 +667,14 @@ class Application(tk.Tk):
             tags = ["impair"] if index % 2 else []
             prefixe_ocr = "🔍 " if op.get("ocr") else ""
 
-            if op["classe"]:
+            if op.get("doublon"):
+                tags.append("doublon")
+                statut = "⧉"
+                emetteur = op.get("emetteur") or "—"
+                categorie = "_doublons (déjà classé)"
+                date = "—"
+                nouveau_nom = "(déjà présent)"
+            elif op["classe"]:
                 statut = "✅"
                 emetteur = op["emetteur"]
                 categorie = op["categorie"]
@@ -787,6 +816,18 @@ class Application(tk.Tk):
         self.bouton_classer.configure(state="disabled")
 
     # =========================================================================
+    # Recherche dans les documents déjà classés
+    # =========================================================================
+    def _ouvrir_recherche(self):
+        """Ouvre la fenêtre de recherche dans la mémoire des documents."""
+        if not MEMOIRE_DISPO:
+            messagebox.showinfo(
+                "Recherche indisponible",
+                "La recherche nécessite le fichier memoire.py.")
+            return
+        DialogueRecherche(self, self.base)
+
+    # =========================================================================
     # Utilitaires
     # =========================================================================
     def _vider_tableau(self):
@@ -884,6 +925,94 @@ class DialogueCorrection(tk.Toplevel):
         index_op = self.parent._index_de_operation(self.operation)
         self.callback(index_op, emetteur_dict, date)
         self.destroy()
+
+
+class DialogueRecherche(tk.Toplevel):
+    """Petite fenêtre pour rechercher dans les documents déjà classés."""
+
+    def __init__(self, parent, base):
+        super().__init__(parent)
+        self.parent = parent
+        self.base = base
+
+        self.title("Rechercher un document")
+        self.transient(parent)
+        self.geometry("760x460")
+
+        cadre = ttk.Frame(self, padding=14)
+        cadre.pack(fill="both", expand=True)
+
+        # --- Ligne de recherche ---
+        ligne = ttk.Frame(cadre)
+        ligne.pack(fill="x")
+        ttk.Label(ligne, text="Rechercher :").pack(side="left")
+        self.var_recherche = tk.StringVar()
+        champ = ttk.Entry(ligne, textvariable=self.var_recherche)
+        champ.pack(side="left", fill="x", expand=True, padx=(8, 8))
+        champ.bind("<Return>", lambda e: self._lancer())
+        style_ok = "Accent.TButton" if THEME_MODERNE_DISPO else "TButton"
+        ttk.Button(ligne, text="Chercher", style=style_ok,
+                   command=self._lancer).pack(side="left")
+
+        ttk.Label(cadre, text="Astuce : plusieurs mots (ex. « EDF 2025 »). "
+                              "Double-clic pour ouvrir le document.",
+                  foreground=COULEUR_DISCRET).pack(anchor="w", pady=(6, 6))
+
+        # --- Tableau des résultats ---
+        colonnes = ("date", "emetteur", "categorie", "montant", "chemin")
+        self.tableau = ttk.Treeview(cadre, columns=colonnes, show="headings")
+        for col, titre, largeur in [
+            ("date", "Date", 100), ("emetteur", "Émetteur", 110),
+            ("categorie", "Catégorie", 160), ("montant", "Montant", 80),
+            ("chemin", "Emplacement", 300),
+        ]:
+            self.tableau.heading(col, text=titre)
+            self.tableau.column(col, width=largeur)
+        barre = ttk.Scrollbar(cadre, orient="vertical", command=self.tableau.yview)
+        self.tableau.configure(yscrollcommand=barre.set)
+        self.tableau.pack(side="left", fill="both", expand=True, pady=(4, 0))
+        barre.pack(side="right", fill="y", pady=(4, 0))
+        self.tableau.bind("<Double-1>", self._ouvrir_document)
+
+        self._resultats = []
+        champ.focus_set()
+
+    def _lancer(self):
+        """Interroge la mémoire et remplit le tableau des résultats."""
+        for ligne in self.tableau.get_children():
+            self.tableau.delete(ligne)
+        self._resultats = memoire.chercher(self.base, self.var_recherche.get())
+        for fiche in self._resultats:
+            montant = f"{fiche['montant']} €" if fiche.get("montant") else ""
+            self.tableau.insert("", "end", values=(
+                fiche.get("date_doc") or "", fiche.get("emetteur") or "",
+                fiche.get("categorie") or "", montant, fiche.get("chemin") or ""))
+        self.title(f"Recherche — {len(self._resultats)} résultat(s)")
+
+    def _ouvrir_document(self, evenement):
+        """Ouvre le document sélectionné dans l'application par défaut."""
+        selection = self.tableau.focus()
+        if not selection:
+            return
+        chemin = self.tableau.item(selection)["values"][4]
+        if not chemin or not Path(chemin).exists():
+            messagebox.showwarning("Introuvable",
+                                   "Ce document n'est plus à cet emplacement.",
+                                   parent=self)
+            return
+        import os
+        import subprocess
+        import sys as _sys
+        try:
+            if _sys.platform.startswith("win"):
+                os.startfile(chemin)
+            elif _sys.platform == "darwin":
+                subprocess.Popen(["open", chemin])
+            else:
+                subprocess.Popen(["xdg-open", chemin])
+        except Exception as erreur:
+            messagebox.showerror("Erreur", f"Impossible d'ouvrir : {erreur}",
+                                 parent=self)
 
 
 def main():
