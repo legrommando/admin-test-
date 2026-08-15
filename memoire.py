@@ -203,6 +203,8 @@ def annoter_doublons(base, operations):
             op["categorie"] = noyau.DOSSIER_DOUBLONS
             op["dossier_cible"] = Path(base) / noyau.DOSSIER_DOUBLONS
             op["nouveau_nom"] = op["source_name"]
+            # Un doublon est déjà classé : il n'est pas « à traiter ».
+            op["urgence"] = 0
         elif empreinte:
             deja_vus.add(empreinte)
 

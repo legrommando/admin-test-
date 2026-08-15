@@ -85,6 +85,7 @@ DOSSIER_RACINE = "Administration"   # dossier principal qui contient tout
 DOSSIER_A_TRIER = "_a_trier"        # là où tu déposes les PDF en vrac
 DOSSIER_NON_CLASSE = "_non_classe"  # là où vont les documents non reconnus
 DOSSIER_DOUBLONS = "_doublons"      # là où vont les documents en double (déjà classés)
+DOSSIER_PRIORITES = "_priorites"    # copies des documents urgents à traiter (triés par échéance)
 FICHIER_REGLES = "regles.yaml"      # les règles de classement (éditable)
 FICHIER_JOURNAL = "journal.csv"     # l'historique des déplacements
 FICHIER_MEMOIRE = "memoire.db"      # base de données (index de tous les documents classés)
@@ -399,6 +400,115 @@ def date_de_modification(chemin_fichier):
 
 
 # =============================================================================
+# Urgence : échéance (date limite) et mots d'action
+# =============================================================================
+# On estime, pour chaque document, s'il faut le TRAITER rapidement :
+#   - a-t-il une échéance (date limite de paiement) proche ou dépassée ?
+#   - contient-il un mot qui réclame une action (relance, mise en demeure) ?
+# On en déduit un « niveau d'urgence » de 0 (rien à faire) à 4 (en retard).
+
+# Mots qui annoncent une DATE LIMITE (on cherche une date juste après).
+_CONTEXTE_ECHEANCE = [
+    "date limite", "limite de paiement", "a payer avant", "a regler avant",
+    "paiement avant", "au plus tard le", "a payer au plus tard", "echeance",
+    "avant le",
+]
+
+# Mots qui signalent une action à faire (même sans date précise).
+MOTS_ACTION = [
+    "mise en demeure", "relance", "rappel", "dernier avis", "dernier rappel",
+    "impaye", "reste a payer", "a regler", "penalite",
+]
+
+
+def extraire_echeance(texte):
+    """Cherche une DATE LIMITE de paiement dans le texte (format AAAA-MM-JJ).
+
+    On repère un mot comme « à payer avant » / « échéance », puis on lit la
+    première date qui suit (dans les caractères juste après). Retourne None si
+    aucune échéance n'est trouvée.
+    """
+    t = sans_accents(texte)
+    for cle in _CONTEXTE_ECHEANCE:
+        depart = 0
+        while True:
+            position = t.find(cle, depart)
+            if position == -1:
+                break
+            # On regarde la petite fenêtre de texte juste après le mot-clé.
+            fenetre = t[position: position + len(cle) + 40]
+            date = extraire_date(fenetre)
+            if date:
+                return date
+            depart = position + len(cle)
+    return None
+
+
+def niveau_urgence(echeance, action_demandee, aujourdhui=None):
+    """Calcule le niveau d'urgence (0 à 4) et un libellé lisible.
+
+    - echeance         : date limite 'AAAA-MM-JJ' ou None
+    - action_demandee  : True si un mot d'action a été détecté
+    - aujourdhui       : date du jour (par défaut : aujourd'hui)
+
+    Retourne un couple (niveau, libellé) :
+      4 « en retard »  : échéance déjà dépassée
+      3 « urgent »     : échéance dans 7 jours ou moins (ou action demandée)
+      2 « à échéance proche » : échéance dans 30 jours ou moins
+      1 « à échéance » : échéance plus lointaine
+      0 « aucune »     : rien de particulier
+    """
+    if aujourdhui is None:
+        aujourdhui = datetime.date.today()
+
+    if echeance:
+        try:
+            e = datetime.date.fromisoformat(echeance)
+        except ValueError:
+            e = None
+        if e:
+            jours = (e - aujourdhui).days
+            if jours < 0:
+                return 4, "en retard"
+            if jours <= 7:
+                return 3, "urgent"
+            if jours <= 30:
+                return 2, "à échéance proche"
+            return 1, "à échéance"
+
+    if action_demandee:
+        return 3, "action demandée"
+    return 0, "aucune"
+
+
+def evaluer_urgence(texte, aujourdhui=None):
+    """Évalue l'urgence d'un document à partir de son texte.
+
+    Retourne un triplet (echeance, niveau, libellé). Voir niveau_urgence.
+    """
+    echeance = extraire_echeance(texte)
+    t = sans_accents(texte)
+    action = any(mot in t for mot in MOTS_ACTION)
+    niveau, libelle = niveau_urgence(echeance, action, aujourdhui)
+    return echeance, niveau, libelle
+
+
+def ordonner_par_urgence(operations):
+    """Retourne les opérations triées du PLUS urgent au MOINS urgent.
+
+    À urgence égale, l'échéance la plus proche passe devant.
+    """
+    return sorted(
+        operations,
+        key=lambda op: (
+            -op.get("urgence", 0),
+            op.get("echeance") or "9999-99-99",
+            op.get("source_name", ""),
+        ),
+    )
+
+
+# =============================================================================
 # Construction du chemin de destination et gestion des collisions
 # =============================================================================
 
@@ -526,6 +636,9 @@ def analyser_fichier(chemin_pdf, regles, base):
             "dossier_cible": base / DOSSIER_NON_CLASSE,
             "nouveau_nom": chemin_pdf.name,   # on garde le nom d'origine
             "ocr": ocr_utilise,
+            "echeance": None,
+            "urgence": 0,
+            "urgence_label": "aucune",
         }
 
     # 3) Confiance suffisante : on trouve la date (ou repli sur date de modif).
@@ -537,6 +650,9 @@ def analyser_fichier(chemin_pdf, regles, base):
 
     # 4) Construire la destination (dossier + nouveau nom) à partir de l'émetteur.
     categorie, dossier_cible, nouveau_nom = composer_destination(base, emetteur, date)
+
+    # 5) Estimer l'urgence (échéance, mots d'action).
+    echeance, urgence, urgence_label = evaluer_urgence(texte)
 
     return {
         "source_path": chemin_pdf,
@@ -550,6 +666,9 @@ def analyser_fichier(chemin_pdf, regles, base):
         "dossier_cible": dossier_cible,
         "nouveau_nom": nouveau_nom,
         "ocr": ocr_utilise,
+        "echeance": echeance,
+        "urgence": urgence,
+        "urgence_label": urgence_label,
     }
 
 
@@ -633,7 +752,33 @@ def appliquer_operation(operation, chemin_journal, lot=""):
         except Exception:
             pass
 
+    # Si le document est urgent, on en dépose une copie dans _priorites
+    # (nommée par échéance, pour un tri naturel du plus urgent au moins urgent).
+    if operation.get("urgence", 0) > 0 and not operation.get("doublon"):
+        try:
+            deposer_dans_priorites(Path(chemin_journal).parent, operation, destination)
+        except Exception:
+            pass
+
     return destination
+
+
+def deposer_dans_priorites(base, operation, destination):
+    """Copie un document urgent dans le dossier _priorites (à traiter).
+
+    Le nom commence par l'échéance (ou 0000-00-00 si action sans date), pour
+    que le dossier se trie tout seul du plus urgent au moins urgent quand on
+    l'ouvre. L'original reste rangé normalement ; ceci n'est qu'une COPIE
+    d'accès rapide. Retourne le chemin de la copie (ou None).
+    """
+    if operation.get("urgence", 0) <= 0:
+        return None
+    dossier = Path(base) / DOSSIER_PRIORITES
+    dossier.mkdir(parents=True, exist_ok=True)
+    prefixe = operation.get("echeance") or "0000-00-00"
+    cible = chemin_sans_collision(dossier / f"{prefixe}__{destination.name}")
+    shutil.copy2(str(destination), str(cible))
+    return cible
 
 
 def annuler_operations(base, dernier_lot_seulement=False, journaliser=print):
@@ -766,6 +911,9 @@ def traiter_dossier(base, regles, mode_execute, moteur="regles"):
     except Exception:
         pass
 
+    # On affiche les documents du PLUS urgent au MOINS urgent.
+    operations = ordonner_par_urgence(operations)
+
     # Rappel visible du mode en cours.
     if mode_execute:
         print(">>> MODE EXECUTION : les fichiers vont être RÉELLEMENT déplacés.\n")
@@ -775,6 +923,7 @@ def traiter_dossier(base, regles, mode_execute, moteur="regles"):
     nb_classes = 0
     nb_non_classes = 0
     nb_doublons = 0
+    nb_urgents = 0
     # Tous les fichiers de cette exécution partagent le même « lot »,
     # ce qui permettra d'annuler uniquement ce classement-ci.
     lot = nouveau_lot()
@@ -804,6 +953,13 @@ def traiter_dossier(base, regles, mode_execute, moteur="regles"):
             print(f"  -> Émetteur : {operation['emetteur']} "
                   f"(catégorie {operation['categorie']}, "
                   f"confiance {operation['confiance']})")
+            # Signalement d'urgence (échéance / action à faire).
+            if operation.get("urgence", 0) > 0:
+                nb_urgents += 1
+                ech = (f" — échéance {operation['echeance']}"
+                       if operation.get("echeance") else "")
+                print(f"  ⏰ À TRAITER ({operation['urgence_label']}){ech} "
+                      f"→ copie dans {DOSSIER_PRIORITES}")
 
         # Aperçu de la destination (nom sans le suffixe anti-collision).
         apercu = operation["dossier_cible"] / operation["nouveau_nom"]
@@ -821,6 +977,8 @@ def traiter_dossier(base, regles, mode_execute, moteur="regles"):
     print(f"  Non classés    : {nb_non_classes}")
     if nb_doublons:
         print(f"  Doublons       : {nb_doublons}")
+    if nb_urgents:
+        print(f"  À traiter      : {nb_urgents}  (voir le dossier {DOSSIER_PRIORITES})")
     if not mode_execute:
         print("  (Simulation : aucun fichier n'a été modifié.)")
 

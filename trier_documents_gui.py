@@ -359,6 +359,7 @@ class Application(tk.Tk):
 
         self.tableau.tag_configure("nonclasse", foreground=COULEUR_ATTENTION)
         self.tableau.tag_configure("doublon", foreground="#3b6fb0")
+        self.tableau.tag_configure("urgent", foreground="#c0392b")
         self.tableau.tag_configure("impair", background=self._couleur_zebre())
 
         barre = ttk.Scrollbar(cadre_tableau, orient="vertical",
@@ -562,6 +563,9 @@ class Application(tk.Tk):
                 except Exception:
                     pass
 
+            # On affiche du plus urgent au moins urgent.
+            operations = noyau.ordonner_par_urgence(operations)
+
             self.file_resultats.put(("ok", operations))
         except Exception as erreur:
             self.file_resultats.put(("erreur", str(erreur)))
@@ -623,6 +627,8 @@ class Application(tk.Tk):
         nb_classes = sum(1 for op in operations if op["classe"] and not op.get("doublon"))
         nb_non = len(operations) - nb_classes - nb_doublons
         nb_ocr = sum(1 for op in operations if op.get("ocr"))
+        nb_urgents = sum(1 for op in operations
+                         if op.get("urgence", 0) > 0 and not op.get("doublon"))
 
         message_ocr = f" (dont {nb_ocr} scan(s) lus par OCR)" if nb_ocr else ""
         texte_doublons = f", {nb_doublons} doublon(s)" if nb_doublons else ""
@@ -632,6 +638,10 @@ class Application(tk.Tk):
             COULEUR_OK if (nb_non == 0 and nb_doublons == 0) else COULEUR_ATTENTION)
         self._message(f"Analyse terminée : {nb_classes} reconnu(s), "
                       f"{nb_non} non classé(s){texte_doublons}{message_ocr}.")
+        if nb_urgents:
+            self._message(f"⏰ {nb_urgents} document(s) à traiter en priorité "
+                          f"(triés en haut du tableau ; une copie ira dans "
+                          f"« {noyau.DOSSIER_PRIORITES} » au classement).")
         self.bouton_classer.configure(state="normal")
 
     def _analyse_echouee_dossier(self):
@@ -675,10 +685,17 @@ class Application(tk.Tk):
                 date = "—"
                 nouveau_nom = "(déjà présent)"
             elif op["classe"]:
-                statut = "✅"
+                # Statut selon l'urgence : 🔴 en retard, 🟠 urgent, 🟡 proche.
+                urg = op.get("urgence", 0)
+                statut = {4: "🔴", 3: "🟠", 2: "🟡"}.get(urg, "✅")
+                if urg >= 3:
+                    tags.append("urgent")
                 emetteur = op["emetteur"]
                 categorie = op["categorie"]
                 date = op["date"] + (" *" if op["date_source"] == "modification" else "")
+                # On ajoute l'échéance (date limite) si le document en a une.
+                if op.get("echeance"):
+                    date += f"  ⏰ {op['echeance']}"
                 nouveau_nom = op["nouveau_nom"]
             else:
                 tags.append("nonclasse")
