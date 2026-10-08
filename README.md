@@ -7,14 +7,17 @@ les **renomme** et les **classe** dans une arborescence Privé / Pro.
 > **Sécurité d'abord :** rien n'est jamais modifié sans que tu voies d'abord
 > un **aperçu**, et le logiciel ne supprime ni n'écrase jamais aucun fichier.
 
-Il y a **deux façons** de s'en servir, au choix :
+Il y a **trois façons** de s'en servir, au choix :
 
 - 🪟 **Le logiciel (fenêtre)** — le plus simple : des boutons, un tableau,
   aucune commande à taper. → voir la section 2.
 - ⌨️ **La ligne de commande** — pour les habitués du terminal ou les
   traitements automatisés. → voir la section 3.
+- 📱 **Sur iPhone / iPad** — un raccourci (app Raccourcis) qui classe tes PDF
+  directement depuis le téléphone, avec le même nommage et le même rangement.
+  → voir le guide **[iPhone-Raccourci-Classeur.md](iPhone-Raccourci-Classeur.md)**.
 
-Les deux utilisent exactement le même moteur de classement.
+Les trois utilisent exactement la même logique de classement.
 
 ---
 
@@ -312,6 +315,7 @@ python3 -m unittest test_trier test_moteur_ia test_memoire
 | `moteur_ia.py`             | moteur **IA locale** (Ollama), facultatif        |
 | `memoire.py`               | mémoire des documents : **recherche** + **doublons** |
 | `regles.yaml`              | les règles de classement (éditable)              |
+| `iPhone-Raccourci-Classeur.md` | **guide iPhone/iPad** : classer tes PDF avec l'app Raccourcis |
 | `generer_pdf_test.py`      | génère 3 PDF de test                             |
 | `test_trier.py`            | tests automatisés du moteur                      |
 | `test_moteur_ia.py`        | tests du moteur IA (faux serveur Ollama)         |
