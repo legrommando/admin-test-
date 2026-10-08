@@ -130,8 +130,10 @@ class Application(tk.Tk):
         self._preparer_apparence()
         self._construire_interface()
         self._activer_glisser_deposer()
+        self._installer_raccourcis()
         self._charger_regles_au_demarrage()
         self._afficher_rappels()   # rappel des documents à traiter, au démarrage
+        self._maj_hint_vide()      # message d'accueil dans le tableau vide
 
         # Sauvegarde des préférences à la fermeture.
         self.protocol("WM_DELETE_WINDOW", self._a_la_fermeture)
@@ -312,8 +314,6 @@ class Application(tk.Tk):
         cadre_actions = ttk.Frame(self, padding=(20, 10, 20, 4))
         cadre_actions.pack(fill="x")
 
-        style_accent = "Accent.TButton" if THEME_MODERNE_DISPO else "TButton"
-
         self.bouton_ajouter = ttk.Button(
             cadre_actions, text="➕  Ajouter des PDF…",
             command=self._ajouter_pdf)
@@ -321,7 +321,7 @@ class Application(tk.Tk):
 
         self.bouton_analyser = ttk.Button(
             cadre_actions, text="①  🔍  Analyser (aperçu)",
-            style=style_accent, command=self._lancer_analyse)
+            command=self._lancer_analyse)
         self.bouton_analyser.pack(side="left", padx=(10, 0), ipady=4)
 
         self.bouton_classer = ttk.Button(
@@ -338,9 +338,14 @@ class Application(tk.Tk):
         ttk.Button(cadre_actions, text="🔎  Rechercher…",
                    command=self._ouvrir_recherche).pack(side="right", ipady=4)
 
+        # Au départ, l'action principale mise en avant est « Analyser ».
+        self._maj_bouton_principal("analyser")
+
         # Petite aide sous les boutons.
         ttk.Label(self,
-                  text="Astuce : double-clique sur une ligne pour corriger sa catégorie.",
+                  text="Astuce : clic droit sur une ligne pour les actions · "
+                       "double-clic pour corriger · raccourcis : F5 Analyser, "
+                       "Ctrl+F Rechercher, Ctrl+Z Annuler.",
                   foreground=COULEUR_DISCRET,
                   padding=(20, 0, 20, 0)).pack(anchor="w")
 
@@ -383,8 +388,24 @@ class Application(tk.Tk):
         self.tableau.pack(side="left", fill="both", expand=True)
         barre.pack(side="right", fill="y")
 
-        # Double-clic sur une ligne = corriger la catégorie.
+        # Message d'accueil affiché au centre du tableau quand il est vide.
+        self.hint_vide = ttk.Label(
+            cadre_tableau, justify="center", foreground=COULEUR_DISCRET,
+            text="Glisse tes PDF ici, ou clique « ➕ Ajouter des PDF… »,\n"
+                 "puis « ① Analyser (aperçu) ».")
+
+        # Double-clic = corriger la catégorie ; clic droit = menu d'actions.
         self.tableau.bind("<Double-1>", self._corriger_ligne)
+        self.tableau.bind("<Button-3>", self._menu_contextuel)      # Windows / Linux
+        self.tableau.bind("<Button-2>", self._menu_contextuel)      # macOS
+        self._construire_menu_contextuel()
+
+        # ---------- LÉGENDE ----------
+        ttk.Label(
+            self,
+            text="Légende :  ✅ reconnu   ⚠ à vérifier   ⧉ doublon   "
+                 "🔴 en retard   🟠 urgent   🟡 échéance proche",
+            foreground=COULEUR_DISCRET, padding=(20, 0, 20, 2)).pack(anchor="w")
 
         # ---------- JOURNAL ----------
         cadre_bas = ttk.Frame(self, padding=(20, 0, 20, 6))
@@ -473,6 +494,7 @@ class Application(tk.Tk):
             self._vider_tableau()
             self.operations = []
             self.bouton_classer.configure(state="disabled")
+            self._maj_bouton_principal("analyser")
             self._sauver_config()
             self._message(f"Dossier de travail : {self.base}")
             self._afficher_rappels()   # rappels du nouveau dossier
@@ -673,6 +695,7 @@ class Application(tk.Tk):
             self._etat("Aucun PDF à traiter.", COULEUR_DISCRET)
             self._message(f"Aucun PDF trouvé dans {self.base / noyau.DOSSIER_A_TRIER}.")
             self.bouton_classer.configure(state="disabled")
+            self._maj_bouton_principal("analyser")
             return
 
         self._remplir_tableau()
@@ -697,6 +720,7 @@ class Application(tk.Tk):
                           f"(triés en haut du tableau ; une copie ira dans "
                           f"« {noyau.DOSSIER_PRIORITES} » au classement).")
         self.bouton_classer.configure(state="normal")
+        self._maj_bouton_principal("classer")   # l'étape suivante est « Classer »
 
     def _analyse_echouee_dossier(self):
         self._verrouiller_boutons(False)
@@ -765,6 +789,7 @@ class Application(tk.Tk):
                 values=(statut, prefixe_ocr + op["source_name"], emetteur,
                         categorie, date, nouveau_nom),
                 tags=tuple(tags))
+        self._maj_hint_vide()
 
     # =========================================================================
     # Correction manuelle (double-clic sur une ligne)
@@ -856,6 +881,7 @@ class Application(tk.Tk):
         self._vider_tableau()
         self.operations = []
         self.bouton_classer.configure(state="disabled")
+        self._maj_bouton_principal("analyser")
         self._afficher_rappels()   # des documents urgents ont pu être ajoutés
 
     # =========================================================================
@@ -886,6 +912,7 @@ class Application(tk.Tk):
         self._vider_tableau()
         self.operations = []
         self.bouton_classer.configure(state="disabled")
+        self._maj_bouton_principal("analyser")
 
     # =========================================================================
     # Recherche dans les documents déjà classés
@@ -905,12 +932,116 @@ class Application(tk.Tk):
     def _vider_tableau(self):
         for ligne in self.tableau.get_children():
             self.tableau.delete(ligne)
+        self._maj_hint_vide()
 
     def _verrouiller_boutons(self, verrouille):
         etat = "disabled" if verrouille else "normal"
         self.bouton_analyser.configure(state=etat)
         self.bouton_annuler.configure(state=etat)
         self.bouton_ajouter.configure(state=etat)
+
+    # =========================================================================
+    # Confort : message d'accueil, bouton principal, menu clic droit, raccourcis
+    # =========================================================================
+    def _maj_hint_vide(self):
+        """Affiche le message d'accueil au centre du tableau quand il est vide."""
+        if not hasattr(self, "hint_vide"):
+            return
+        if self.tableau.get_children():
+            self.hint_vide.place_forget()
+        else:
+            self.hint_vide.place(relx=0.5, rely=0.42, anchor="center")
+
+    def _maj_bouton_principal(self, principal):
+        """Met en avant (couleur d'accent) l'action à faire : analyser ou classer."""
+        if not THEME_MODERNE_DISPO:
+            return
+        self.bouton_analyser.configure(
+            style="Accent.TButton" if principal == "analyser" else "TButton")
+        self.bouton_classer.configure(
+            style="Accent.TButton" if principal == "classer" else "TButton")
+
+    def _installer_raccourcis(self):
+        """Raccourcis clavier pratiques sur la fenêtre principale."""
+        self.bind("<F5>", lambda e: self._lancer_analyse())
+        self.bind("<Control-f>", lambda e: self._ouvrir_recherche())
+        self.bind("<Control-z>", lambda e: self._annuler())
+        self.bind("<Control-o>", lambda e: self._ajouter_pdf())
+        self.bind("<Return>", self._sur_entree)
+
+    def _sur_entree(self, evenement):
+        """Entrée sur une ligne sélectionnée = corriger sa catégorie."""
+        if self.tableau.selection():
+            self._corriger_selection()
+
+    def _construire_menu_contextuel(self):
+        """Crée le menu qui apparaît au clic droit sur une ligne du tableau."""
+        self._menu = tk.Menu(self, tearoff=0)
+        self._menu.add_command(label="📄  Ouvrir le document",
+                               command=self._ouvrir_document_selection)
+        self._menu.add_command(label="✏️  Corriger la catégorie…",
+                               command=self._corriger_selection)
+        self._menu.add_separator()
+        self._menu.add_command(label="⚠  Marquer « non classé »",
+                               command=self._forcer_non_classe_selection)
+
+    def _menu_contextuel(self, evenement):
+        """Affiche le menu du clic droit sur la ligne survolée."""
+        ligne = self.tableau.identify_row(evenement.y)
+        if not ligne:
+            return
+        self.tableau.selection_set(ligne)
+        self.tableau.focus(ligne)
+        try:
+            self._menu.tk_popup(evenement.x_root, evenement.y_root)
+        finally:
+            self._menu.grab_release()
+
+    def _op_selectionnee(self):
+        """Retourne (index, opération) de la ligne sélectionnée, ou (None, None)."""
+        selection = self.tableau.selection()
+        if not selection:
+            return None, None
+        index = int(selection[0])
+        return index, self.operations[index]
+
+    def _ouvrir_document_selection(self):
+        """Ouvre le PDF de la ligne sélectionnée."""
+        _, op = self._op_selectionnee()
+        if op is not None:
+            self._ouvrir_chemin(op["source_path"])
+
+    def _corriger_selection(self):
+        """Ouvre la correction de catégorie pour la ligne sélectionnée."""
+        _, op = self._op_selectionnee()
+        if op is not None:
+            DialogueCorrection(self, op, self.regles, self._appliquer_correction)
+
+    def _forcer_non_classe_selection(self):
+        """Force la ligne sélectionnée en « non classé »."""
+        index, op = self._op_selectionnee()
+        if op is not None:
+            self._appliquer_correction(index, None, None)
+
+    def _ouvrir_chemin(self, chemin):
+        """Ouvre un fichier (ou dossier) dans l'application par défaut du système."""
+        chemin = Path(chemin)
+        if not chemin.exists():
+            messagebox.showwarning("Introuvable",
+                                   "Ce document n'est plus à cet emplacement.")
+            return
+        import os
+        import subprocess
+        import sys as _sys
+        try:
+            if _sys.platform.startswith("win"):
+                os.startfile(str(chemin))
+            elif _sys.platform == "darwin":
+                subprocess.Popen(["open", str(chemin)])
+            else:
+                subprocess.Popen(["xdg-open", str(chemin)])
+        except Exception as erreur:
+            messagebox.showerror("Erreur", f"Impossible d'ouvrir :\n{erreur}")
 
 
 class DialogueCorrection(tk.Toplevel):
